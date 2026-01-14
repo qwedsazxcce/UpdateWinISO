@@ -4,8 +4,9 @@
 1. 本项目的主要目的是：使用`Win_ISO_Patching_Scripts`自动集成`Windows 10/11`更新(使用`Github Actions`自动构建)
 
 ## 地址
-1. 本仓库地址: https://github.com/yuanpeirong/UpdateWinISO
-2. `Win_ISO_Patching_Scripts`地址: https://github.com/adavak/Win_ISO_Patching_Scripts
+1. 本仓库地址: https://github.com/yuanpeirong/UpdateWinISO (只发布源码)
+2. 备用仓库地址: https://github.com/yprsoft/UpdateWinISO (发布源码+镜像)
+3. `Win_ISO_Patching_Scripts`地址: https://github.com/adavak/Win_ISO_Patching_Scripts
 
 ## 目前已构建`Windows 10`版本
 - Windows 10 22H2 amd64：
