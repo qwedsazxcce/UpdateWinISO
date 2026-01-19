@@ -1,6 +1,6 @@
-name: 下载ISO并分卷压缩上传到Releases
+name: 下载多ISO分卷压缩并上传到Releases
 
-# 手动触发（可根据需要添加自动触发条件）
+# 手动触发（可添加push/schedule实现自动触发）
 on:
   workflow_dispatch:
 
@@ -8,72 +8,87 @@ jobs:
   download-compress-upload:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1：检出仓库（上传Release需要仓库上下文）
+      # 步骤1：检出仓库（提供Release上传上下文）
       - name: 检出代码仓库
         uses: actions/checkout@v4
 
-      # 步骤2：安装7zip（用于分卷压缩）
+      # 步骤2：安装7zip完整版（支持分卷压缩）
       - name: 安装7zip压缩工具
         run: |
           sudo apt update
-          sudo apt install -y p7zip-full  # Ubuntu下的7zip完整版，支持分卷压缩
+          sudo apt install -y p7zip-full
 
-      # 步骤3：下载ISO文件（规避网关异常，验证完整性）
-      - name: 下载Windows Server 2022 ISO文件
+      # 步骤3：定义下载列表（方便维护，新增文件只需加在这里）
+      - name: 定义下载链接和文件名
         run: |
-          # 目标下载链接
-          DOWNLOAD_URL="https://software-static.download.prss.microsoft.com/sg/download/9d275562-9994-4f9c-a373-78e755fe4d3f/zh-cn_windows_server_2022_x64_dvd_6c73507d.iso"
-          # 定义本地保存的文件名（严格按要求）
-          ISO_FILE="zh-cn_windows_server_2022_x64_dvd_6c73507d.iso"
-          
-          # 带完整请求头下载，规避GatewayExceptionResponse
-          curl -L -o "${ISO_FILE}" \
-            --retry 10 \
-            --retry-delay 15 \
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            --header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
-            --header "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8" \
-            "${DOWNLOAD_URL}"
-          
-          # 验证文件大小（确保下载完整）
-          EXPECTED_SIZE=5805221888
-          ACTUAL_SIZE=$(stat -c%s "${ISO_FILE}")
-          if [ "${ACTUAL_SIZE}" -ne "${EXPECTED_SIZE}" ]; then
-            echo "❌ 文件大小不匹配！预期: ${EXPECTED_SIZE} 实际: ${ACTUAL_SIZE}"
-            exit 1
-          fi
-          echo "✅ ISO文件下载完成且大小验证通过"
+          echo "ISO_LIST=(
+            'https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso'
+            'https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66756/20348.1787.230607-0640.fe_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso'
+          )" >> $GITHUB_ENV
 
-      # 步骤4：7z分卷压缩（1950M/卷，保留原文件名）
-      - name: 7z分卷压缩ISO文件（1950M/卷）
+      # 步骤4：批量下载ISO文件（保留原名，规避网关异常）
+      - name: 下载所有ISO文件
         run: |
-          # 定义文件名（与下载的ISO同名，压缩后为xxx.iso.7z.001/002...）
-          ISO_FILE="zh-cn_windows_server_2022_x64_dvd_6c73507d.iso"
-          COMPRESS_FILE="${ISO_FILE}.7z"
-          
-          # 7z分卷压缩命令：
-          # -a：添加文件到压缩包
-          # -v1950M：分卷大小1950MB
-          # -t7z：指定7z格式
-          # -mx9：最高压缩级别（可改为-mx5平衡速度/压缩率）
-          7z a -v1950M -t7z -mx9 "${COMPRESS_FILE}" "${ISO_FILE}"
-          
-          # 列出压缩后的分卷文件，确认生成成功
-          echo "✅ 压缩完成，生成的分卷文件："
-          ls -l "${ISO_FILE}.7z."*
+          # 遍历下载列表，逐个下载
+          for iso_url in "${{ env.ISO_LIST[@] }}"; do
+            # 从URL中提取原始文件名（最后一个/后的部分）
+            iso_filename=$(basename "$iso_url")
+            echo "开始下载：$iso_filename"
+            
+            # 带请求头+重试下载，强制保留原始文件名
+            curl -L -o "${iso_filename}" \
+              --retry 10 \
+              --retry-delay 15 \
+              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+              --header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+              --header "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8" \
+              "$iso_url"
+            
+            # 验证文件是否下载成功
+            if [ -f "${iso_filename}" ]; then
+              echo "✅ $iso_filename 下载完成，文件大小：$(du -h "${iso_filename}" | awk '{print $1}')"
+            else
+              echo "❌ $iso_filename 下载失败！"
+              exit 1
+            fi
+          done
 
-      # 步骤5：上传所有分卷文件到Releases
+      # 步骤5：批量分卷压缩（每个ISO独立压缩，1950M/卷，保留原名）
+      - name: 7z分卷压缩所有ISO文件
+        run: |
+          # 遍历当前目录下所有ISO文件，逐个压缩
+          for iso_file in *.iso; do
+            if [ -f "$iso_file" ]; then
+              echo "开始压缩：$iso_file"
+              # 压缩后文件名 = 原ISO名.7z，分卷自动生成001/002后缀
+              compress_name="${iso_file}.7z"
+              
+              # 7z分卷压缩核心命令：1950M/卷、7z格式、最高压缩级别
+              7z a -v1950M -t7z -mx9 "${compress_name}" "${iso_file}"
+              
+              # 验证压缩分卷是否生成
+              if ls "${iso_file}.7z."* 1> /dev/null 2>&1; then
+                echo "✅ $iso_file 压缩完成，分卷文件："
+                ls -l "${iso_file}.7z."*
+              else
+                echo "❌ $iso_file 压缩失败！"
+                exit 1
+              fi
+            fi
+          done
+
+      # 步骤6：上传所有分卷文件到Releases
       - name: 上传分卷文件到Server_2022-2025 Releases
         uses: softprops/action-gh-release@v2
         with:
           # 指定Release标签（严格匹配你的项目名）
           tag_name: Server_2022-2025
-          # 覆盖已存在的同名文件
+          # 覆盖已存在的同名文件（避免重复上传报错）
           overwrite: true
-          # 上传所有7z分卷文件（匹配xxx.iso.7z.001/002...）
+          # 上传所有7z分卷文件（匹配所有ISO的分卷）
           files: |
-            zh-cn_windows_server_2022_x64_dvd_6c73507d.iso.7z.*
-          # 非草稿/预发布
+            *.iso.7z.*
+          # 非草稿/预发布，直接发布
           draft: false
           prerelease: false
         env:
