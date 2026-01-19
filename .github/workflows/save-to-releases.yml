@@ -1,116 +1,134 @@
-name: 下载多ISO分卷压缩并上传到Releases
+name: 分步下载压缩上传ISO到Releases
 
-# 手动触发（避免自动触发干扰）
 on:
   workflow_dispatch:
 
 jobs:
-  download-compress-upload:
+  process-isos-step-by-step:
     runs-on: ubuntu-latest
-    # 延长运行超时时间（默认36分钟，大文件需更长）
     timeout-minutes: 120
     steps:
-      # 步骤1：检出仓库（必须，上传Release需要）
+      # 基础准备：检出仓库 + 安装7zip（修复版本校验）
       - name: 检出代码仓库
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1  # 仅拉取最新代码，加快速度
+          fetch-depth: 1
 
-      # 步骤2：安装7zip并校验（修复安装后无校验的问题）
-      - name: 安装并验证7zip
+      - name: 安装并验证7zip工具（修复版本校验参数）
         run: |
-          echo "=== 开始安装7zip ==="
           sudo apt update -y
-          sudo apt install -y p7zip-full
-          # 校验7zip是否安装成功
+          # 确保7zip完整安装
+          sudo apt install -y p7zip p7zip-full
+          
+          # 修复：Ubuntu下7z不支持--version，改用直接运行7z获取版本（兼容写法）
+          echo "=== 检查7zip是否安装成功 ==="
           if command -v 7z &> /dev/null; then
-            echo "✅ 7zip安装成功，版本：$(7z --version | head -n1)"
+            # 正确获取7zip版本的方式：直接运行7z，取第一行版本信息
+            7z_VERSION=$(7z | head -n1)
+            echo "✅ 7zip安装成功，版本信息：$7z_VERSION"
           else
-            echo "❌ 7zip安装失败！"
+            echo "❌ 7zip安装失败！未找到7z命令"
             exit 1
           fi
 
-      # 步骤3：下载第一个ISO文件（单独处理，避免数组报错）
+      # ===================== 处理第一个ISO =====================
       - name: 下载第一个ISO文件
         run: |
-          # 第一个ISO的链接和文件名
-          ISO_URL_1="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso"
-          ISO_NAME_1=$(basename "$ISO_URL_1")
+          ISO_URL="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso"
+          ISO_NAME=$(basename "$ISO_URL")
           
-          echo "=== 开始下载：$ISO_NAME_1 ==="
-          # 修复curl参数，增加超时和断点续传
-          curl -L -o "$ISO_NAME_1" \
+          echo "=== 开始下载第一个ISO：$ISO_NAME ==="
+          curl -L -o "$ISO_NAME" \
             --retry 10 \
             --retry-delay 15 \
             --max-time 7200 \
             -C - \
             --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            "$ISO_URL_1"
+            "$ISO_URL"
           
-          # 校验文件是否存在
-          if [ -f "$ISO_NAME_1" ]; then
-            echo "✅ 第一个ISO下载完成，大小：$(du -h "$ISO_NAME_1" | awk '{print $1}')"
+          if [ -f "$ISO_NAME" ] && [ -s "$ISO_NAME" ]; then
+            echo "✅ 第一个ISO下载完成，大小：$(du -h "$ISO_NAME" | awk '{print $1}')"
+            echo "FIRST_ISO_NAME=$ISO_NAME" >> $GITHUB_ENV
           else
-            echo "❌ 第一个ISO下载失败！"
+            echo "❌ 第一个ISO下载失败（文件为空或不存在）！"
             exit 1
           fi
 
-      # 步骤4：下载第二个ISO文件（单独处理，更稳定）
+      - name: 压缩第一个ISO（1950M分卷）
+        run: |
+          ISO_NAME="${{ env.FIRST_ISO_NAME }}"
+          COMPRESS_NAME="${ISO_NAME}.7z"
+          
+          echo "=== 开始压缩第一个ISO：$ISO_NAME ==="
+          # 7z命令参数保持不变（-v1950M等参数是兼容的）
+          7z a -v1950M -t7z -mx5 "$COMPRESS_NAME" "$ISO_NAME"
+          
+          if ls "${ISO_NAME}.7z."* 1> /dev/null 2>&1; then
+            echo "✅ 第一个ISO压缩完成，分卷列表："
+            ls -l "${ISO_NAME}.7z."*
+          else
+            echo "❌ 第一个ISO压缩失败！"
+            exit 1
+          fi
+
+      - name: 上传第一个ISO的分卷到Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: Server_2022-2025
+          overwrite: true
+          files: |
+            ${{ env.FIRST_ISO_NAME }}.7z.*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ===================== 处理第二个ISO =====================
       - name: 下载第二个ISO文件
         run: |
-          # 第二个ISO的链接和文件名
-          ISO_URL_2="https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66756/20348.1787.230607-0640.fe_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso"
-          ISO_NAME_2=$(basename "$ISO_URL_2")
+          ISO_URL="https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66756/20348.1787.230607-0640.fe_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso"
+          ISO_NAME=$(basename "$ISO_URL")
           
-          echo "=== 开始下载：$ISO_NAME_2 ==="
-          curl -L -o "$ISO_NAME_2" \
+          echo "=== 开始下载第二个ISO：$ISO_NAME ==="
+          curl -L -o "$ISO_NAME" \
             --retry 10 \
             --retry-delay 15 \
             --max-time 7200 \
             -C - \
             --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            "$ISO_URL_2"
+            "$ISO_URL"
           
-          # 校验文件是否存在
-          if [ -f "$ISO_NAME_2" ]; then
-            echo "✅ 第二个ISO下载完成，大小：$(du -h "$ISO_NAME_2" | awk '{print $1}')"
+          if [ -f "$ISO_NAME" ] && [ -s "$ISO_NAME" ]; then
+            echo "✅ 第二个ISO下载完成，大小：$(du -h "$ISO_NAME" | awk '{print $1}')"
+            echo "SECOND_ISO_NAME=$ISO_NAME" >> $GITHUB_ENV
           else
             echo "❌ 第二个ISO下载失败！"
             exit 1
           fi
 
-      # 步骤5：分卷压缩所有ISO（逐个处理，增加日志）
-      - name: 7z分卷压缩ISO文件（1950M/卷）
+      - name: 压缩第二个ISO（1950M分卷）
         run: |
-          echo "=== 开始压缩所有ISO文件 ==="
-          # 遍历所有ISO文件
-          for iso_file in *.iso; do
-            if [ -f "$iso_file" ]; then
-              echo "正在压缩：$iso_file"
-              compress_name="${iso_file}.7z"
-              
-              # 7z压缩命令（简化参数，降低报错概率）
-              7z a -v1950M -t7z -mx5 "$compress_name" "$iso_file"
-              
-              # 校验分卷是否生成
-              if ls "${iso_file}.7z."* 1> /dev/null 2>&1; then
-                echo "✅ $iso_file 压缩完成，分卷列表："
-                ls -l "${iso_file}.7z."*
-              else
-                echo "❌ $iso_file 压缩失败！"
-                exit 1
-              fi
-            fi
-          done
+          ISO_NAME="${{ env.SECOND_ISO_NAME }}"
+          COMPRESS_NAME="${ISO_NAME}.7z"
+          
+          echo "=== 开始压缩第二个ISO：$ISO_NAME ==="
+          7z a -v1950M -t7z -mx5 "$COMPRESS_NAME" "$ISO_NAME"
+          
+          if ls "${ISO_NAME}.7z."* 1> /dev/null 2>&1; then
+            echo "✅ 第二个ISO压缩完成，分卷列表："
+            ls -l "${ISO_NAME}.7z."*
+          else
+            echo "❌ 第二个ISO压缩失败！"
+            exit 1
+          fi
 
-      # 步骤6：上传到Releases（修复action版本和参数）
-      - name: 上传分卷到Server_2022-2025 Releases
-        uses: softprops/action-gh-release@v1  # 改用稳定的v1版本
+      - name: 上传第二个ISO的分卷到Releases
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: Server_2022-2025
           overwrite: true
           files: |
-            *.iso.7z.*
+            ${{ env.SECOND_ISO_NAME }}.7z.*
           draft: false
           prerelease: false
         env:
