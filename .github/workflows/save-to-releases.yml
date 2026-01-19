@@ -1,40 +1,54 @@
-name: 从OneDrive下载文件→保留原名→发布到指定Release
+name: 解析OneDrive真实地址→下载文件→发布到Release
 on:
-  workflow_dispatch:  # 手动触发，避免误执行
+  workflow_dispatch:  # 手动触发
 
 jobs:
   download-upload:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1：创建目录存放下载的文件
-      - name: 创建文件存储目录
-        run: mkdir -p ./onedrive-downloads
+      # 步骤1：创建存储目录
+      - name: 创建目录
+        run: mkdir -p ./onedrive-files
 
-      # 步骤2：下载OneDrive文件（修正curl参数，解决--timeout报错）
-      - name: 从OneDrive下载并保留原文件名
+      # 步骤2：核心！解析OneDrive分享链接的真实下载地址
+      - name: 解析真实文件下载地址
         run: |
-          # OneDrive公开分享链接
-          ONEDRIVE_URL="https://1drv.ms/f/c/371b320e0c098119/IgDA0vyfMhr-Q5daEnkYtiWvAXe-9LfPzICx8GITsOQkDqY?e=6pViqC"
+          # OneDrive分享链接
+          SHARE_URL="https://1drv.ms/f/c/371b320e0c098119/IgDA0vyfMhr-Q5daEnkYtiWvAXe-9LfPzICx8GITsOQkDqY?e=6pViqC"
           
-          # 修正后的curl参数（兼容所有版本）
-          # --max-time 300：替代--timeout，设置5分钟超时（核心修正）
-          # -L：跟随重定向 | -O：保留原文件名 | -J：遵从服务器文件名
-          # --retry 10：重试10次 | --retry-delay 5：重试间隔5秒
-          curl -L -O -J --retry 10 --retry-delay 5 --max-time 300 \
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            "${ONEDRIVE_URL}" --output-dir ./onedrive-downloads/  # 兼容写法：指定下载目录
+          # 解析真实下载地址（关键：模拟浏览器请求，获取最终文件地址）
+          REAL_DOWNLOAD_URL=$(curl -s -L -I -o /dev/null -w '%{url_effective}' \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            "${SHARE_URL}&download=1")  # 强制触发下载模式
           
-          # 验证下载结果
-          echo "下载的文件列表："
-          ls -lh ./onedrive-downloads/
+          echo "解析到的真实下载地址：${REAL_DOWNLOAD_URL}"
+          # 将真实地址写入临时文件，供下一步使用
+          echo "REAL_DOWNLOAD_URL=${REAL_DOWNLOAD_URL}" >> $GITHUB_ENV
 
-      # 步骤3：发布到Server_2022-2025标签的Releases
-      - name: 上传到指定Release标签
+      # 步骤3：下载真实文件（保留原文件名）
+      - name: 下载OneDrive实际文件
+        run: |
+          # 从环境变量读取真实下载地址
+          curl -L -O -J --retry 15 --retry-delay 5 --max-time 600 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            "${{ env.REAL_DOWNLOAD_URL }}" --output-dir ./onedrive-files/
+          
+          # 验证下载结果：查看文件大小和名称
+          echo "下载完成，文件信息："
+          ls -lh ./onedrive-files/
+          # 检查是否是HTML文件（若仍是小文件，会提示）
+          if [[ $(file ./onedrive-files/* | grep -c "HTML") -gt 0 ]]; then
+            echo "错误：下载的是HTML页面，未获取到真实文件！"
+            exit 1
+          fi
+
+      # 步骤4：发布到Server_2022-2025标签Releases
+      - name: 上传到指定Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: Server_2022-2025
           release_name: Windows Server 2022 + 2025 镜像文件
-          files: ./onedrive-downloads/*
+          files: ./onedrive-files/*
           overwrite: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
