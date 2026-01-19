@@ -1,0 +1,36 @@
+name: 下载文件并发布到已有Release标签
+on:
+  workflow_dispatch:  # 手动触发，避免误执行
+
+jobs:
+  download-and-upload-to-existing-release:
+    runs-on: ubuntu-latest
+    steps:
+      # 步骤1：创建目录存放下载的文件
+      - name: 创建文件存储目录
+        run: mkdir -p ./win10-ltsc2021-x86-files
+
+      # 步骤2：下载指定的两个分卷文件（处理URL特殊字符）
+      - name: 下载Win10 LTSC2021 x86分卷
+        run: |
+          # 下载001分卷
+          curl -L -o ./win10-ltsc2021-x86-files/zh-cn_windows_10_enterprise_ltsc_2021_x86_dvd_30600d9c.7z.001 \
+            "http://nekopara.x3322.net:5244/d/misc/zh-cn_windows_10_enterprise_ltsc_2021_x86_dvd_30600d9c.7z.001?sign=IVmIxXT1hmxr4fvYZRhW7RNWu1M90pGbflujj3zMuSI=:0"
+          
+          # 下载002分卷
+          curl -L -o ./win10-ltsc2021-x86-files/zh-cn_windows_10_enterprise_ltsc_2021_x86_dvd_30600d9c.7z.002 \
+            "http://nekopara.x3322.net:5244/d/misc/zh-cn_windows_10_enterprise_ltsc_2021_x86_dvd_30600d9c.7z.002?sign=UNpoFGSsSsXIUGVPhq46zmQ2ZAalREOsPTbs_knjJD8=:0"
+          
+          # 可选：验证下载结果，查看文件大小和数量
+          ls -lh ./win10-ltsc2021-x86-files/
+
+      # 步骤3：上传到已有Release标签（核心：overwrite: true）
+      - name: 发布到已有的Windows_LTSC_2021_2024标签
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: Windows_LTSC_2021_2024  # 固定指向已有标签
+          release_name: Windows10 LTSC2021 + Windows11 LTSC2024 镜像分卷  # 可保留原有名称，无需修改
+          files: ./win10-ltsc2021-x86-files/*  # 上传本次下载的所有文件
+          overwrite: true  # 关键：覆盖/追加到已有标签的Release（不删除原有文件，仅替换同名文件）
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动提供，无需手动配置
