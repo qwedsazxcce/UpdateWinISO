@@ -1,54 +1,44 @@
-name: 下载并重命名→同名分卷压缩→发布到指定Release
+name: 从OneDrive下载文件→保留原名→发布到指定Release
 on:
   workflow_dispatch:  # 手动触发，避免误执行
 
 jobs:
-  download-compress-upload:
+  download-upload:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1：安装7z压缩工具（Ubuntu必须手动安装）
-      - name: 安装p7zip-full
-        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+      # 步骤1：创建目录存放下载的文件（避免与其他文件混淆）
+      - name: 创建文件存储目录
+        run: mkdir -p ./onedrive-downloads
 
-      # 步骤2：创建目录存放原始ISO和压缩分卷
-      - name: 创建存储目录
+      # 步骤2：下载OneDrive文件（核心：处理重定向+保留原文件名+稳连参数）
+      - name: 从OneDrive下载并保留原文件名
         run: |
-          mkdir -p ./win10-ltsc-iso  # 存放重命名后的ISO
-          mkdir -p ./win10-ltsc-7z  # 存放同名压缩分卷
-
-      # 步骤3：下载文件+强制重命名为目标ISO名
-      - name: 下载并命名为zh-cn_windows_10_enterprise_ltsc_2021_x86_dvd_30600d9c.iso
-        run: |
-          # 定义目标文件名（与需求完全一致）
-          ISO_NAME="zh-cn_windows_10_enterprise_ltsc_2021_x86_dvd_30600d9c.iso"
-          # 下载链接（双引号包裹特殊字符，避免curl解析失败）
-          DOWNLOAD_URL="https://trashbytes.net/dl/DpiSCDtjR6S7h-4CdrJGMSZNBOknadoBGstyOQ-uvtP2a5xA0O__slD_1RgYlQ69EO5-yxL7kER4aMik7z9mvG0hhm2aHM2Lov9Bv_7vFhViTy0EBxgixjNSSNA-34VhibgzjWnUQIGxbpAP_r-lQUMXIoK6VnXyqvRBUyBo?v=1768822952-vUwQSW%2Foip1a4dt0f8tSrCWHQ6sfgHIeWnN5q5Ngsd8%3D"
-          # 下载并强制重命名
-          curl -L -o ./win10-ltsc-iso/${ISO_NAME} "${DOWNLOAD_URL}"
+          # OneDrive公开分享链接
+          ONEDRIVE_URL="https://1drv.ms/f/c/371b320e0c098119/IgDA0vyfMhr-Q5daEnkYtiWvAXe-9LfPzICx8GITsOQkDqY?e=6pViqC"
           
-          # 验证下载结果：查看文件名和大小
-          ls -lh ./win10-ltsc-iso/
-
-      # 步骤4：核心逻辑→同名分卷压缩（1950M/卷，去掉.iso后缀）
-      - name: 同名分卷压缩（1950M/卷）
-        run: |
-          # 目标ISO文件名
-          ISO_NAME="zh-cn_windows_10_enterprise_ltsc_2021_x86_dvd_30600d9c.iso"
-          # 压缩包名=ISO名去掉.iso后缀 → 实现同名压缩
-          COMPRESS_NAME="${ISO_NAME%.iso}"
-          # 分卷压缩命令：最终分卷名=COMPRESS_NAME.7z.001/.002...
-          7z a -v1950M ./win10-ltsc-7z/${COMPRESS_NAME}.7z ./win10-ltsc-iso/${ISO_NAME} -mx=9
+          # curl参数说明（解决OneDrive重定向+保留原名+稳定下载）
+          # -L：跟随重定向（OneDrive分享链接会跳转到真实下载地址）
+          # -O：保存为远程服务器的文件名（保留原名核心参数）
+          # -J：强制遵从服务器返回的文件名（防止curl自动重命名）
+          # --retry 10：失败重试10次
+          # --retry-delay 5：重试间隔5秒
+          # --timeout 300：超时时间5分钟（应对大文件）
+          # --user-agent：模拟浏览器请求，避免被拦截
+          curl -L -O -J --retry 10 --retry-delay 5 --timeout 300 \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            "${ONEDRIVE_URL}" -o ./onedrive-downloads/  # 下载到指定目录
           
-          # 验证压缩结果：查看分卷文件名是否和ISO同名
-          ls -lh ./win10-ltsc-7z/
+          # 验证下载结果：列出目录文件，确认文件名和大小
+          echo "下载的文件列表："
+          ls -lh ./onedrive-downloads/
 
-      # 步骤5：发布到Windows_LTSC_2021_2024标签Releases
+      # 步骤3：发布到Server_2022-2025标签的Releases
       - name: 上传到指定Release标签
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: Windows_LTSC_2021_2024  # 目标Release标签
-          release_name: Windows10 LTSC2021 + Windows11 LTSC2024 镜像分卷
-          files: ./win10-ltsc-7z/*  # 上传所有压缩分卷
+          tag_name: Server_2022-2025  # 目标Release标签
+          release_name: Windows Server 2022 + 2025 镜像文件
+          files: ./onedrive-downloads/*  # 上传下载目录下的所有文件（保留原名）
           overwrite: true  # 追加/覆盖已有文件，保留标签下其他内容
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动提供，无需配置
