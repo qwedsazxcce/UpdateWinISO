@@ -1,43 +1,80 @@
-name: 下载OneDrive文件并上传到Releases
+name: 下载ISO并分卷压缩上传到Releases
 
-# 触发方式：手动触发（也可添加push等自动触发条件）
+# 手动触发（可根据需要添加自动触发条件）
 on:
   workflow_dispatch:
 
 jobs:
-  download-and-upload:
+  download-compress-upload:
     runs-on: ubuntu-latest
     steps:
       # 步骤1：检出仓库（上传Release需要仓库上下文）
       - name: 检出代码仓库
         uses: actions/checkout@v4
 
-      # 步骤2：下载OneDrive文件（保持原文件名）
-      - name: 从OneDrive下载文件
+      # 步骤2：安装7zip（用于分卷压缩）
+      - name: 安装7zip压缩工具
         run: |
-          # OneDrive直链（追加了download=1参数）
-          ONEDRIVE_URL="https://1drv.ms/f/c/371b320e0c098119/IgCD2fuOsRxbTbEn8gqDidsWAX8Sv8LVWJe8YdB4sQq2ZM8?e=XZTP8O&download=1"
-          
-          # 使用curl下载，自动保留原始文件名（-OJ参数）
-          # -L：跟随重定向；-O：保留原文件名；-J：从响应头解析文件名；--retry：失败重试
-          curl -L -O -J --retry 5 "$ONEDRIVE_URL"
-          
-          # 打印下载的文件列表，确认文件存在
-          echo "已下载的文件："
-          ls -l
+          sudo apt update
+          sudo apt install -y p7zip-full  # Ubuntu下的7zip完整版，支持分卷压缩
 
-      # 步骤3：上传文件到GitHub Releases
-      - name: 上传到Releases
+      # 步骤3：下载ISO文件（规避网关异常，验证完整性）
+      - name: 下载Windows Server 2022 ISO文件
+        run: |
+          # 目标下载链接
+          DOWNLOAD_URL="https://software-static.download.prss.microsoft.com/sg/download/9d275562-9994-4f9c-a373-78e755fe4d3f/zh-cn_windows_server_2022_x64_dvd_6c73507d.iso"
+          # 定义本地保存的文件名（严格按要求）
+          ISO_FILE="zh-cn_windows_server_2022_x64_dvd_6c73507d.iso"
+          
+          # 带完整请求头下载，规避GatewayExceptionResponse
+          curl -L -o "${ISO_FILE}" \
+            --retry 10 \
+            --retry-delay 15 \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            --header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+            --header "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8" \
+            "${DOWNLOAD_URL}"
+          
+          # 验证文件大小（确保下载完整）
+          EXPECTED_SIZE=5805221888
+          ACTUAL_SIZE=$(stat -c%s "${ISO_FILE}")
+          if [ "${ACTUAL_SIZE}" -ne "${EXPECTED_SIZE}" ]; then
+            echo "❌ 文件大小不匹配！预期: ${EXPECTED_SIZE} 实际: ${ACTUAL_SIZE}"
+            exit 1
+          fi
+          echo "✅ ISO文件下载完成且大小验证通过"
+
+      # 步骤4：7z分卷压缩（1950M/卷，保留原文件名）
+      - name: 7z分卷压缩ISO文件（1950M/卷）
+        run: |
+          # 定义文件名（与下载的ISO同名，压缩后为xxx.iso.7z.001/002...）
+          ISO_FILE="zh-cn_windows_server_2022_x64_dvd_6c73507d.iso"
+          COMPRESS_FILE="${ISO_FILE}.7z"
+          
+          # 7z分卷压缩命令：
+          # -a：添加文件到压缩包
+          # -v1950M：分卷大小1950MB
+          # -t7z：指定7z格式
+          # -mx9：最高压缩级别（可改为-mx5平衡速度/压缩率）
+          7z a -v1950M -t7z -mx9 "${COMPRESS_FILE}" "${ISO_FILE}"
+          
+          # 列出压缩后的分卷文件，确认生成成功
+          echo "✅ 压缩完成，生成的分卷文件："
+          ls -l "${ISO_FILE}.7z."*
+
+      # 步骤5：上传所有分卷文件到Releases
+      - name: 上传分卷文件到Server_2022-2025 Releases
         uses: softprops/action-gh-release@v2
         with:
-          # 指定Release名称（对应你的server_2022-2025项目）
-          tag_name: server_2022-2025
-          # 如果Release不存在则创建，存在则追加文件
+          # 指定Release标签（严格匹配你的项目名）
+          tag_name: Server_2022-2025
+          # 覆盖已存在的同名文件
+          overwrite: true
+          # 上传所有7z分卷文件（匹配xxx.iso.7z.001/002...）
+          files: |
+            zh-cn_windows_server_2022_x64_dvd_6c73507d.iso.7z.*
+          # 非草稿/预发布
           draft: false
           prerelease: false
-          # 上传当前目录下的所有文件（保持原文件名）
-          files: |
-            ./*
         env:
-          # 必要的GitHub令牌（Actions默认提供）
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
