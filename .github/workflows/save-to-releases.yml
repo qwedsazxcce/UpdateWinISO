@@ -1,34 +1,54 @@
-name: 下载指定文件并保存到Release
+name: 下载Server2025 ISO→同名分卷压缩→发布到指定Release
 on:
-  workflow_dispatch:  # 手动触发（需在Actions页面点击运行）
+  workflow_dispatch:  # 手动触发，避免误执行
+
 jobs:
-  download-and-upload:
-    runs-on: ubuntu-latest  # 运行环境（Ubuntu稳定且下载速度快）
+  download-compress-upload:
+    runs-on: ubuntu-latest
     steps:
-      # 第一步：创建文件夹存放下载的文件
-      - name: 创建文件存储目录
-        run: mkdir -p ./ltsc-isos  # 文件夹名：ltsc-isos（可自定义）
+      # 步骤1：安装7z压缩工具
+      - name: 安装p7zip-full
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
 
-      # 第二步：下载6个指定的分卷文件
-      - name: 下载Win10 LTSC2021分卷文件
+      # 步骤2：创建存储目录
+      - name: 创建目录存放ISO和压缩分卷
         run: |
-          # Win10 LTSC2021 3个分卷
-          curl -L -o ./ltsc-isos/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.001 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows10ISO/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.001"
-          curl -L -o ./ltsc-isos/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.002 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows10ISO/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.002"
-          curl -L -o ./ltsc-isos/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.003 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows10ISO/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.003"
-          
-          # Win11 LTSC2024 3个分卷
-          curl -L -o ./ltsc-isos/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.001 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows11ISO/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.001"
-          curl -L -o ./ltsc-isos/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.002 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows11ISO/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.002"
-          curl -L -o ./ltsc-isos/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.003 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows11ISO/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.003"
+          mkdir -p ./server-iso  # 原始ISO
+          mkdir -p ./server-7z-split  # 同名压缩分卷
 
-      # 第三步：上传文件到自己的Release
-      - name: 上传到Release
-        uses: softprops/action-gh-release@v2  # 成熟的Release上传工具
+      # 步骤3：下载ISO，严格保留原始文件名
+      - name: 下载Windows Server 2025 ISO
+        run: |
+          # 定义原始文件名（与需求完全一致，无修改）
+          ISO_NAME="X23-81954_26100.1742.240906-0331.ge_release_svc_refresh_SERVER_OEMRET_x64FRE_zh-cn.iso"
+          # 下载链接
+          DOWNLOAD_URL="https://oemsoc.download.prss.microsoft.com/dbazure/X23-81954_26100.1742.240906-0331.ge_release_svc_refresh_SERVER_OEMRET_x64FRE_zh-cn.iso_c0a03233-3c87-4c90-9fac-9cbf668255c1?t=fdfcc05d-ef3b-45a4-8f87-cd492f6d10de&P1=102817441905&P2=601&P3=2&P4=phtRoTOxQBx%2bH5nhSijWBQw9deo3wwkODOj9HbwaH1%2fC%2bYTg5C7FrUUduOXIC9TzweFPlCY0YlpXM1ZD%2fj3dYrYwBbRnCeeDOvzHTjIMoZvtjfKHH%2bfI3IdPFJBa6gv5sL69QQFUUmaWqRHCTT81p6IYcNwuwOUrNW9u3BVttXiQNIAX9XrrYbWAHHmfkLW3wR2YdstEsFxF8sIQ4w1V6Znm3B7NO7Rv%2fjk3nyhQ9zzMjZFjdIlkZg4NbAhYE12EZr9pHHR0AHQeW2%2fN%2fVhGjoaYWYjHMTtfNV48EJbeQoQKrrfdLTQ%2fHk6%2bGUxO5D8xCPfkr0vpr7oBo2uICepJ3w%3d%3d"
+          # 下载并强制命名为原始文件名
+          curl -L -o ./server-iso/${ISO_NAME} "${DOWNLOAD_URL}"
+          
+          # 验证下载结果
+          ls -lh ./server-iso/
+
+      # 步骤4：核心修改→压缩分卷与原始ISO同名（去掉.iso后缀，加.7z）
+      - name: 同名分卷压缩（1950M/卷）
+        run: |
+          # 原始ISO文件名
+          ISO_NAME="X23-81954_26100.1742.240906-0331.ge_release_svc_refresh_SERVER_OEMRET_x64FRE_zh-cn.iso"
+          # 压缩包名=原始文件名去掉.iso后缀 → 实现同名压缩
+          COMPRESS_NAME="${ISO_NAME%.iso}"
+          # 分卷压缩命令：压缩后文件名=COMPRESS_NAME.7z.001/.002...
+          7z a -v1950M ./server-7z-split/${COMPRESS_NAME}.7z ./server-iso/${ISO_NAME} -mx=9
+          
+          # 验证压缩结果：查看分卷文件名是否和原始ISO同名
+          ls -lh ./server-7z-split/
+
+      # 步骤5：发布到指定Release标签
+      - name: 上传到server 2022+2025标签Releases
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: Windows_LTSC_2021_2024  # 自定义Release标签（可修改，如：LTSC-ISO-2026）
-          release_name: Windows10 LTSC2021 + Windows11 LTSC2024 镜像分卷  # 自定义Release名称
-          files: ./ltsc-isos/*  # 上传所有下载的文件（ltsc-isos文件夹下的所有文件）
-          overwrite: true  # 如果标签已存在，覆盖原有文件（避免重复创建标签）
+          tag_name: server 2022+2025
+          release_name: Windows Server 2022 + 2025 原版镜像分卷
+          files: ./server-7z-split/*
+          overwrite: true  # 追加/覆盖已有文件，保留Server2022内容
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动生成的令牌，无需手动配置
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
