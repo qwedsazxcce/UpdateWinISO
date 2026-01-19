@@ -1,0 +1,34 @@
+name: 下载指定文件并保存到Release
+on:
+  workflow_dispatch:  # 手动触发（需在Actions页面点击运行）
+jobs:
+  download-and-upload:
+    runs-on: ubuntu-latest  # 运行环境（Ubuntu稳定且下载速度快）
+    steps:
+      # 第一步：创建文件夹存放下载的文件
+      - name: 创建文件存储目录
+        run: mkdir -p ./ltsc-isos  # 文件夹名：ltsc-isos（可自定义）
+
+      # 第二步：下载6个指定的分卷文件
+      - name: 下载Win10 LTSC2021分卷文件
+        run: |
+          # Win10 LTSC2021 3个分卷
+          curl -L -o ./ltsc-isos/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.001 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows10ISO/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.001"
+          curl -L -o ./ltsc-isos/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.002 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows10ISO/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.002"
+          curl -L -o ./ltsc-isos/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.003 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows10ISO/zh-cn_windows_10_enterprise_ltsc_2021_x64_dvd_033b7312.7z.003"
+          
+          # Win11 LTSC2024 3个分卷
+          curl -L -o ./ltsc-isos/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.001 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows11ISO/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.001"
+          curl -L -o ./ltsc-isos/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.002 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows11ISO/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.002"
+          curl -L -o ./ltsc-isos/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.003 "https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows11ISO/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.003"
+
+      # 第三步：上传文件到自己的Release
+      - name: 上传到Release
+        uses: softprops/action-gh-release@v2  # 成熟的Release上传工具
+        with:
+          tag_name: Windows_LTSC_2021_2024  # 自定义Release标签（可修改，如：LTSC-ISO-2026）
+          release_name: Windows10 LTSC2021 + Windows11 LTSC2024 镜像分卷  # 自定义Release名称
+          files: ./ltsc-isos/*  # 上传所有下载的文件（ltsc-isos文件夹下的所有文件）
+          overwrite: true  # 如果标签已存在，覆盖原有文件（避免重复创建标签）
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动生成的令牌，无需手动配置
