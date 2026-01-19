@@ -19,7 +19,7 @@ jobs:
       # 步骤2：解析OneDrive真实下载地址（保留核心逻辑）
       - name: 解析真实文件下载地址
         run: |
-          SHARE_URL="https://1drv.ms/f/c/371b320e0c098119/IgDA0vyfMhr-Q5daEnkYtiWvAXe-9LfPzICx8GITsOQkDqY?e=6pViqC"
+          SHARE_URL="https://onedrive.live.com/?cid=371b320e0c098119&id=371B320E0C098119%21s8efbd9831cb14d5bb127f20a8389db16&resid=371B320E0C098119%21s8efbd9831cb14d5bb127f20a8389db16&ithint=folder&e=XZTP8O&migratedtospo=true&redeem=aHR0cHM6Ly8xZHJ2Lm1zL2YvYy8zNzFiMzIwZTBjMDk4MTE5L0lnQ0QyZnVPc1J4YlRiRW44Z3FEaWRzV0FYOFN2OExWV0plOFlkQjRzUXEyWk04P2U9WFpUUDhP&v=validatepermission"
           # 解析真实下载地址（强制下载模式+模拟浏览器）
           REAL_DOWNLOAD_URL=$(curl -s -L -I -o /dev/null -w '%{url_effective}' \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
