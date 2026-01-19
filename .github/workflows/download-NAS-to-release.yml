@@ -1,36 +1,50 @@
-name: 下载文件并发布到已有Release标签
+name: 下载文件→7z分卷压缩→发布到指定Release
 on:
   workflow_dispatch:  # 手动触发，避免误执行
 
 jobs:
-  download-and-upload-to-existing-release:
+  download-compress-release:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1：创建目录存放下载的文件
-      - name: 创建文件存储目录
-        run: mkdir -p ./win10-ltsc2021-x86-files
+      # 步骤1：安装7z压缩工具（Ubuntu默认无，必须安装）
+      - name: 安装p7zip-full
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
 
-      # 步骤2：下载指定的两个分卷文件（处理URL特殊字符）
-      - name: 下载Win10 LTSC2021 x86分卷
+      # 步骤2：创建目录存放原始文件和压缩分卷
+      - name: 创建存储目录
         run: |
-          # 下载001分卷
-          curl -L -o ./win10-ltsc2021-x86-files/zh-cn_windows_10_enterprise_ltsc_2021_x86_dvd_30600d9c.7z.001 \
-            "http://nekopara.x3322.net:5244/d/misc/zh-cn_windows_10_enterprise_ltsc_2021_x86_dvd_30600d9c.7z.001?sign=IVmIxXT1hmxr4fvYZRhW7RNWu1M90pGbflujj3zMuSI=:0"
-          
-          # 下载002分卷
-          curl -L -o ./win10-ltsc2021-x86-files/zh-cn_windows_10_enterprise_ltsc_2021_x86_dvd_30600d9c.7z.002 \
-            "http://nekopara.x3322.net:5244/d/misc/zh-cn_windows_10_enterprise_ltsc_2021_x86_dvd_30600d9c.7z.002?sign=UNpoFGSsSsXIUGVPhq46zmQ2ZAalREOsPTbs_knjJD8=:0"
-          
-          # 可选：验证下载结果，查看文件大小和数量
-          ls -lh ./win10-ltsc2021-x86-files/
+          mkdir -p ./original-file  # 存放下载的原始文件
+          mkdir -p ./7z-split-files  # 存放压缩后的分卷
 
-      # 步骤3：上传到已有Release标签（核心：overwrite: true）
-      - name: 发布到已有的Windows_LTSC_2021_2024标签
+      # 步骤3：下载目标文件（处理链接特殊字符，确保下载成功）
+      - name: 下载指定文件
+        run: |
+          # 下载文件并命名为win_image.raw（自定义名称，方便识别）
+          curl -L -o ./original-file/win_image.raw \
+            "https://trashbytes.net/dl/DpiSCDtjR6S7h-4CdrJGMSZNBOknadoBGstyOQ-uvtP2a5xA0O__slD_1RgYlQ69EO5-yxL7kER4aMik7z9mvG0hhm2aHM2Lov9Bv_7vFhViTy0EBxgixjNSSNA-34VhibgzjWnUQIGxbpAP_r-lQUMXIoK6VnXyqvRBUyBo?v=1768822952-vUwQSW%2Foip1a4dt0f8tSrCWHQ6sfgHIeWnN5q5Ngsd8%3D"
+          
+          # 验证下载结果（查看文件大小，确认下载完成）
+          ls -lh ./original-file/
+
+      # 步骤4：7z分卷压缩（核心：1.9GB=1950M分卷，适配GitHub 2GB限制）
+      - name: 分卷压缩文件（1.9GB/卷）
+        run: |
+          # 压缩参数说明：
+          # -v1950M：分卷大小1950MB（1.9G）
+          # -mx=9：最高压缩级别（减小体积，可改为-mx=5提升速度）
+          # Win_LTSC_2021_2024.7z：压缩包基础名称，会自动生成.001/.002等分卷
+          7z a -v1950M ./7z-split-files/Win_LTSC_2021_2024.7z ./original-file/* -mx=9
+          
+          # 验证压缩结果（查看分卷文件）
+          ls -lh ./7z-split-files/
+
+      # 步骤5：发布压缩分卷到已有Release标签
+      - name: 上传到Windows_LTSC_2021_2024标签
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: Windows_LTSC_2021_2024  # 固定指向已有标签
-          release_name: Windows10 LTSC2021 + Windows11 LTSC2024 镜像分卷  # 可保留原有名称，无需修改
-          files: ./win10-ltsc2021-x86-files/*  # 上传本次下载的所有文件
-          overwrite: true  # 关键：覆盖/追加到已有标签的Release（不删除原有文件，仅替换同名文件）
+          tag_name: Windows_LTSC_2021_2024  # 已有Release标签
+          release_name: Windows10 LTSC2021 + Windows11 LTSC2024 镜像分卷
+          files: ./7z-split-files/*  # 上传所有压缩分卷
+          overwrite: true  # 追加/覆盖该标签下的文件（保留原有文件，仅替换同名分卷）
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动提供，无需手动配置
