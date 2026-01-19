@@ -6,44 +6,52 @@ jobs:
   download-upload:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1：创建存储目录
-      - name: 创建目录
-        run: mkdir -p ./onedrive-files
-
-      # 步骤2：核心！解析OneDrive分享链接的真实下载地址
-      - name: 解析真实文件下载地址
+      # 步骤1：创建并检查存储目录（确保目录存在）
+      - name: 创建并验证目录
         run: |
-          # OneDrive分享链接
-          SHARE_URL="https://1drv.ms/f/c/371b320e0c098119/IgDA0vyfMhr-Q5daEnkYtiWvAXe-9LfPzICx8GITsOQkDqY?e=6pViqC"
-          
-          # 解析真实下载地址（关键：模拟浏览器请求，获取最终文件地址）
-          REAL_DOWNLOAD_URL=$(curl -s -L -I -o /dev/null -w '%{url_effective}' \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            "${SHARE_URL}&download=1")  # 强制触发下载模式
-          
-          echo "解析到的真实下载地址：${REAL_DOWNLOAD_URL}"
-          # 将真实地址写入临时文件，供下一步使用
-          echo "REAL_DOWNLOAD_URL=${REAL_DOWNLOAD_URL}" >> $GITHUB_ENV
-
-      # 步骤3：下载真实文件（保留原文件名）
-      - name: 下载OneDrive实际文件
-        run: |
-          # 从环境变量读取真实下载地址
-          curl -L -O -J --retry 15 --retry-delay 5 --max-time 600 \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            "${{ env.REAL_DOWNLOAD_URL }}" --output-dir ./onedrive-files/
-          
-          # 验证下载结果：查看文件大小和名称
-          echo "下载完成，文件信息："
-          ls -lh ./onedrive-files/
-          # 检查是否是HTML文件（若仍是小文件，会提示）
-          if [[ $(file ./onedrive-files/* | grep -c "HTML") -gt 0 ]]; then
-            echo "错误：下载的是HTML页面，未获取到真实文件！"
+          mkdir -p ./onedrive-files
+          # 检查目录是否创建成功
+          if [ ! -d "./onedrive-files" ]; then
+            echo "错误：目录创建失败！"
             exit 1
           fi
 
-      # 步骤4：发布到Server_2022-2025标签Releases
-      - name: 上传到指定Release
+      # 步骤2：解析OneDrive真实下载地址（保留核心逻辑）
+      - name: 解析真实文件下载地址
+        run: |
+          SHARE_URL="https://1drv.ms/f/c/371b320e0c098119/IgDA0vyfMhr-Q5daEnkYtiWvAXe-9LfPzICx8GITsOQkDqY?e=6pViqC"
+          # 解析真实下载地址（强制下载模式+模拟浏览器）
+          REAL_DOWNLOAD_URL=$(curl -s -L -I -o /dev/null -w '%{url_effective}' \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            "${SHARE_URL}&download=1")
+          
+          echo "解析到的真实地址：${REAL_DOWNLOAD_URL}"
+          echo "REAL_DOWNLOAD_URL=${REAL_DOWNLOAD_URL}" >> $GITHUB_ENV
+
+      # 步骤3：核心修正！cd到目录后下载，避免--output-dir兼容问题
+      - name: 下载OneDrive实际文件（无兼容问题）
+        run: |
+          # 进入目标目录（关键：文件会直接保存到这里）
+          cd ./onedrive-files
+          # 执行下载（-O/-J保留原文件名，无路径问题）
+          curl -L -O -J --retry 15 --retry-delay 5 --max-time 600 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            "${{ env.REAL_DOWNLOAD_URL }}"
+          
+          # 回到上级目录，验证下载结果
+          cd ..
+          echo "下载完成，文件列表："
+          ls -lh ./onedrive-files/
+          # 校验是否为HTML小文件
+          HTML_COUNT=$(file ./onedrive-files/* 2>/dev/null | grep -c "HTML")
+          if [ ${HTML_COUNT:-0} -gt 0 ]; then
+            echo "❌ 错误：下载的是HTML页面，未获取到真实文件！"
+            cat ./onedrive-files/*  # 打印HTML内容，方便排查
+            exit 1
+          fi
+
+      # 步骤4：发布到指定Release标签
+      - name: 上传到Server_2022-2025
         uses: softprops/action-gh-release@v2
         with:
           tag_name: Server_2022-2025
