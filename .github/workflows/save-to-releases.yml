@@ -1,62 +1,43 @@
-name: 解析OneDrive真实地址→下载文件→发布到Release
+name: 下载OneDrive文件并上传到Releases
+
+# 触发方式：手动触发（也可添加push等自动触发条件）
 on:
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
 
 jobs:
-  download-upload:
+  download-and-upload:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1：创建并检查存储目录（确保目录存在）
-      - name: 创建并验证目录
-        run: |
-          mkdir -p ./onedrive-files
-          # 检查目录是否创建成功
-          if [ ! -d "./onedrive-files" ]; then
-            echo "错误：目录创建失败！"
-            exit 1
-          fi
+      # 步骤1：检出仓库（上传Release需要仓库上下文）
+      - name: 检出代码仓库
+        uses: actions/checkout@v4
 
-      # 步骤2：解析OneDrive真实下载地址（保留核心逻辑）
-      - name: 解析真实文件下载地址
+      # 步骤2：下载OneDrive文件（保持原文件名）
+      - name: 从OneDrive下载文件
         run: |
-          SHARE_URL="https://onedrive.live.com/?cid=371b320e0c098119&id=371B320E0C098119%21s8efbd9831cb14d5bb127f20a8389db16&resid=371B320E0C098119%21s8efbd9831cb14d5bb127f20a8389db16&ithint=folder&e=XZTP8O&migratedtospo=true&redeem=aHR0cHM6Ly8xZHJ2Lm1zL2YvYy8zNzFiMzIwZTBjMDk4MTE5L0lnQ0QyZnVPc1J4YlRiRW44Z3FEaWRzV0FYOFN2OExWV0plOFlkQjRzUXEyWk04P2U9WFpUUDhP&v=validatepermission"
-          # 解析真实下载地址（强制下载模式+模拟浏览器）
-          REAL_DOWNLOAD_URL=$(curl -s -L -I -o /dev/null -w '%{url_effective}' \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            "${SHARE_URL}&download=1")
+          # OneDrive直链（追加了download=1参数）
+          ONEDRIVE_URL="https://1drv.ms/f/c/371b320e0c098119/IgCD2fuOsRxbTbEn8gqDidsWAX8Sv8LVWJe8YdB4sQq2ZM8?e=XZTP8O&download=1"
           
-          echo "解析到的真实地址：${REAL_DOWNLOAD_URL}"
-          echo "REAL_DOWNLOAD_URL=${REAL_DOWNLOAD_URL}" >> $GITHUB_ENV
-
-      # 步骤3：核心修正！cd到目录后下载，避免--output-dir兼容问题
-      - name: 下载OneDrive实际文件（无兼容问题）
-        run: |
-          # 进入目标目录（关键：文件会直接保存到这里）
-          cd ./onedrive-files
-          # 执行下载（-O/-J保留原文件名，无路径问题）
-          curl -L -O -J --retry 15 --retry-delay 5 --max-time 600 \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            "${{ env.REAL_DOWNLOAD_URL }}"
+          # 使用curl下载，自动保留原始文件名（-OJ参数）
+          # -L：跟随重定向；-O：保留原文件名；-J：从响应头解析文件名；--retry：失败重试
+          curl -L -O -J --retry 5 "$ONEDRIVE_URL"
           
-          # 回到上级目录，验证下载结果
-          cd ..
-          echo "下载完成，文件列表："
-          ls -lh ./onedrive-files/
-          # 校验是否为HTML小文件
-          HTML_COUNT=$(file ./onedrive-files/* 2>/dev/null | grep -c "HTML")
-          if [ ${HTML_COUNT:-0} -gt 0 ]; then
-            echo "❌ 错误：下载的是HTML页面，未获取到真实文件！"
-            cat ./onedrive-files/*  # 打印HTML内容，方便排查
-            exit 1
-          fi
+          # 打印下载的文件列表，确认文件存在
+          echo "已下载的文件："
+          ls -l
 
-      # 步骤4：发布到指定Release标签
-      - name: 上传到Server_2022-2025
+      # 步骤3：上传文件到GitHub Releases
+      - name: 上传到Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: Server_2022-2025
-          release_name: Windows Server 2022 + 2025 镜像文件
-          files: ./onedrive-files/*
-          overwrite: true
+          # 指定Release名称（对应你的server_2022-2025项目）
+          tag_name: server_2022-2025
+          # 如果Release不存在则创建，存在则追加文件
+          draft: false
+          prerelease: false
+          # 上传当前目录下的所有文件（保持原文件名）
+          files: |
+            ./*
         env:
+          # 必要的GitHub令牌（Actions默认提供）
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
