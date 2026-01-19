@@ -6,29 +6,25 @@ jobs:
   download-upload:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1：创建目录存放下载的文件（避免与其他文件混淆）
+      # 步骤1：创建目录存放下载的文件
       - name: 创建文件存储目录
         run: mkdir -p ./onedrive-downloads
 
-      # 步骤2：下载OneDrive文件（核心：处理重定向+保留原文件名+稳连参数）
+      # 步骤2：下载OneDrive文件（修正curl参数，解决--timeout报错）
       - name: 从OneDrive下载并保留原文件名
         run: |
           # OneDrive公开分享链接
           ONEDRIVE_URL="https://1drv.ms/f/c/371b320e0c098119/IgDA0vyfMhr-Q5daEnkYtiWvAXe-9LfPzICx8GITsOQkDqY?e=6pViqC"
           
-          # curl参数说明（解决OneDrive重定向+保留原名+稳定下载）
-          # -L：跟随重定向（OneDrive分享链接会跳转到真实下载地址）
-          # -O：保存为远程服务器的文件名（保留原名核心参数）
-          # -J：强制遵从服务器返回的文件名（防止curl自动重命名）
-          # --retry 10：失败重试10次
-          # --retry-delay 5：重试间隔5秒
-          # --timeout 300：超时时间5分钟（应对大文件）
-          # --user-agent：模拟浏览器请求，避免被拦截
-          curl -L -O -J --retry 10 --retry-delay 5 --timeout 300 \
+          # 修正后的curl参数（兼容所有版本）
+          # --max-time 300：替代--timeout，设置5分钟超时（核心修正）
+          # -L：跟随重定向 | -O：保留原文件名 | -J：遵从服务器文件名
+          # --retry 10：重试10次 | --retry-delay 5：重试间隔5秒
+          curl -L -O -J --retry 10 --retry-delay 5 --max-time 300 \
             --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            "${ONEDRIVE_URL}" -o ./onedrive-downloads/  # 下载到指定目录
+            "${ONEDRIVE_URL}" --output-dir ./onedrive-downloads/  # 兼容写法：指定下载目录
           
-          # 验证下载结果：列出目录文件，确认文件名和大小
+          # 验证下载结果
           echo "下载的文件列表："
           ls -lh ./onedrive-downloads/
 
@@ -36,9 +32,9 @@ jobs:
       - name: 上传到指定Release标签
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: Server_2022-2025  # 目标Release标签
+          tag_name: Server_2022-2025
           release_name: Windows Server 2022 + 2025 镜像文件
-          files: ./onedrive-downloads/*  # 上传下载目录下的所有文件（保留原名）
-          overwrite: true  # 追加/覆盖已有文件，保留标签下其他内容
+          files: ./onedrive-downloads/*
+          overwrite: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动提供，无需配置
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
