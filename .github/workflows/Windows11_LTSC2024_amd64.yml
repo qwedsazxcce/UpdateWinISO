@@ -34,9 +34,9 @@ jobs:
         cd Win_ISO_Patching_Scripts
         
         # 下载镜像
-        curl -L -o zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.001 https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows11ISO/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.001
-        curl -L -o zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.002 https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows11ISO/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.002
-        curl -L -o zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.003 https://github.com/yuanpeirong/UpdateWinISO/releases/download/Windows11ISO/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.003
+        curl -L -o zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.001 https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows_LTSC_2021_2024/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.001
+        curl -L -o zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.002 https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows_LTSC_2021_2024/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.002
+        curl -L -o zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.003 https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows_LTSC_2021_2024/zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.003
         7z x zh-cn_windows_11_enterprise_ltsc_2024_x64_dvd_cff9cd2d.7z.001
         ls
 
