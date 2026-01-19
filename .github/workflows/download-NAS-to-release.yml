@@ -1,50 +1,60 @@
-name: 下载文件→7z分卷压缩→发布到指定Release
+name: 稳定下载Server2025 ISO→同名分卷压缩→发布到Release
 on:
   workflow_dispatch:  # 手动触发，避免误执行
 
 jobs:
-  download-compress-release:
+  download-compress-upload:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1：安装7z压缩工具（Ubuntu默认无，必须安装）
+      # 步骤1：安装7z压缩工具
       - name: 安装p7zip-full
         run: sudo apt-get update && sudo apt-get install -y p7zip-full
 
-      # 步骤2：创建目录存放原始文件和压缩分卷
-      - name: 创建存储目录
+      # 步骤2：创建存储目录（区分原始ISO和压缩分卷）
+      - name: 创建目录
         run: |
-          mkdir -p ./original-file  # 存放下载的原始文件
-          mkdir -p ./7z-split-files  # 存放压缩后的分卷
+          mkdir -p ./server-iso  # 存放重命名后的ISO
+          mkdir -p ./server-7z-split  # 存放同名压缩分卷
 
-      # 步骤3：下载目标文件（处理链接特殊字符，确保下载成功）
-      - name: 下载指定文件
+      # 步骤3：换wget下载（解决curl重试失败，加稳连参数）
+      - name: 稳定下载并命名为指定ISO文件名
         run: |
-          # 下载文件并命名为win_image.raw（自定义名称，方便识别）
-          curl -L -o ./original-file/win_image.raw \
-            "https://trashbytes.net/dl/DpiSCDtjR6S7h-4CdrJGMSZNBOknadoBGstyOQ-uvtP2a5xA0O__slD_1RgYlQ69EO5-yxL7kER4aMik7z9mvG0hhm2aHM2Lov9Bv_7vFhViTy0EBxgixjNSSNA-34VhibgzjWnUQIGxbpAP_r-lQUMXIoK6VnXyqvRBUyBo?v=1768822952-vUwQSW%2Foip1a4dt0f8tSrCWHQ6sfgHIeWnN5q5Ngsd8%3D"
+          # 定义目标文件名（严格匹配你的要求）
+          ISO_NAME="zh-X23-81954_26100.1742.240906-0331.ge_release_svc_refresh_SERVER_OEMRET_x64FRE_zh-cn.iso"
+          # 下载链接（双引号包裹特殊字符）
+          DOWNLOAD_URL="https://oemsoc.download.prss.microsoft.com/dbazure/X23-81954_26100.1742.240906-0331.ge_release_svc_refresh_SERVER_OEMRET_x64FRE_zh-cn.iso_c0a03233-3c87-4c90-9fac-9cbf668255c1?t=fdfcc05d-ef3b-45a4-8f87-cd492f6d10de&P1=102817441905&P2=601&P3=2&P4=phtRoTOxQBx%2bH5nhSijWBQw9deo3wwkODOj9HbwaH1%2fC%2bYTg5C7FrUUduOXIC9TzweFPlCY0YlpXM1ZD%2fj3dYrYwBbRnCeeDOvzHTjIMoZvtjfKHH%2bfI3IdPFJBa6gv5sL69QQFUUmaWqRHCTT81p6IYcNwuwOUrNW9u3BVttXiQNIAX9XrrYbWAHHmfkLW3wR2YdstEsFxF8sIQ4w1V6Znm3B7NO7Rv%2fjk3nyhQ9zzMjZFjdIlkZg4NbAhYE12EZr9pHHR0AHQeW2%2fN%2fVhGjoaYWYjHMTtfNV48EJbeQoQKrrfdLTQ%2fHk6%2bGUxO5D8xCPfkr0vpr7oBo2uICepJ3w%3d%3d"
           
-          # 验证下载结果（查看文件大小，确认下载完成）
-          ls -lh ./original-file/
-
-      # 步骤4：7z分卷压缩（核心：1.9GB=1950M分卷，适配GitHub 2GB限制）
-      - name: 分卷压缩文件（1.9GB/卷）
-        run: |
-          # 压缩参数说明：
-          # -v1950M：分卷大小1950MB（1.9G）
-          # -mx=9：最高压缩级别（减小体积，可改为-mx=5提升速度）
-          # Win_LTSC_2021_2024.7z：压缩包基础名称，会自动生成.001/.002等分卷
-          7z a -v1950M ./7z-split-files/Win_LTSC_2021_2024.7z ./original-file/* -mx=9
+          # 核心：wget稳连参数（解决重试失败）
+          # --retry-connrefused：连接被拒也重试
+          # --waitretry=5：重试间隔5秒
+          # --timeout=600：超时时间10分钟（应对大文件）
+          # --continue：断点续传（断了能接着下）
+          # --user-agent：模拟浏览器UA（避免服务器拦截）
+          # -O：强制命名为指定文件名
+          wget --retry-connrefused --waitretry=5 --timeout=600 --tries=20 --continue --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -O ./server-iso/${ISO_NAME} "${DOWNLOAD_URL}"
           
-          # 验证压缩结果（查看分卷文件）
-          ls -lh ./7z-split-files/
+          # 验证下载结果：查看文件名+大小，确认下载成功
+          ls -lh ./server-iso/
 
-      # 步骤5：发布压缩分卷到已有Release标签
-      - name: 上传到Windows_LTSC_2021_2024标签
+      # 步骤4：同名分卷压缩（1950M/卷，去掉.iso后缀）
+      - name: 1950M分卷压缩（与ISO同名）
+        run: |
+          ISO_NAME="zh-X23-81954_26100.1742.240906-0331.ge_release_svc_refresh_SERVER_OEMRET_x64FRE_zh-cn.iso"
+          # 压缩包名=ISO名去掉.iso后缀 → 分卷名=xxx.7z.001/002...
+          COMPRESS_NAME="${ISO_NAME%.iso}"
+          # 7z参数：-v1950M=1950M/卷，-mx=9=最高压缩，-bb1=显示压缩进度
+          7z a -v1950M -mx=9 -bb1 ./server-7z-split/${COMPRESS_NAME}.7z ./server-iso/${ISO_NAME}
+          
+          # 验证压缩结果：查看分卷文件名
+          ls -lh ./server-7z-split/
+
+      # 步骤5：发布到server 2022-2025标签的Releases
+      - name: 上传到指定Release标签
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: Windows_LTSC_2021_2024  # 已有Release标签
-          release_name: Windows10 LTSC2021 + Windows11 LTSC2024 镜像分卷
-          files: ./7z-split-files/*  # 上传所有压缩分卷
-          overwrite: true  # 追加/覆盖该标签下的文件（保留原有文件，仅替换同名分卷）
+          tag_name: server 2022-2025  # 目标Release标签
+          release_name: Windows Server 2022 + 2025 原版镜像分卷
+          files: ./server-7z-split/*  # 上传所有压缩分卷
+          overwrite: true  # 追加/覆盖已有文件，保留标签下其他内容
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动提供，无需手动配置
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动提供，无需配置
