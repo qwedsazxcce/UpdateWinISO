@@ -1,74 +1,100 @@
 name: 下载多ISO分卷压缩并上传到Releases
 
-# 手动触发（可添加push/schedule实现自动触发）
+# 手动触发（避免自动触发干扰）
 on:
   workflow_dispatch:
 
 jobs:
   download-compress-upload:
     runs-on: ubuntu-latest
+    # 延长运行超时时间（默认36分钟，大文件需更长）
+    timeout-minutes: 120
     steps:
-      # 步骤1：检出仓库（提供Release上传上下文）
+      # 步骤1：检出仓库（必须，上传Release需要）
       - name: 检出代码仓库
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1  # 仅拉取最新代码，加快速度
 
-      # 步骤2：安装7zip完整版（支持分卷压缩）
-      - name: 安装7zip压缩工具
+      # 步骤2：安装7zip并校验（修复安装后无校验的问题）
+      - name: 安装并验证7zip
         run: |
-          sudo apt update
+          echo "=== 开始安装7zip ==="
+          sudo apt update -y
           sudo apt install -y p7zip-full
+          # 校验7zip是否安装成功
+          if command -v 7z &> /dev/null; then
+            echo "✅ 7zip安装成功，版本：$(7z --version | head -n1)"
+          else
+            echo "❌ 7zip安装失败！"
+            exit 1
+          fi
 
-      # 步骤3：定义下载列表（方便维护，新增文件只需加在这里）
-      - name: 定义下载链接和文件名
+      # 步骤3：下载第一个ISO文件（单独处理，避免数组报错）
+      - name: 下载第一个ISO文件
         run: |
-          echo "ISO_LIST=(
-            'https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso'
-            'https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66756/20348.1787.230607-0640.fe_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso'
-          )" >> $GITHUB_ENV
+          # 第一个ISO的链接和文件名
+          ISO_URL_1="https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso"
+          ISO_NAME_1=$(basename "$ISO_URL_1")
+          
+          echo "=== 开始下载：$ISO_NAME_1 ==="
+          # 修复curl参数，增加超时和断点续传
+          curl -L -o "$ISO_NAME_1" \
+            --retry 10 \
+            --retry-delay 15 \
+            --max-time 7200 \
+            -C - \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            "$ISO_URL_1"
+          
+          # 校验文件是否存在
+          if [ -f "$ISO_NAME_1" ]; then
+            echo "✅ 第一个ISO下载完成，大小：$(du -h "$ISO_NAME_1" | awk '{print $1}')"
+          else
+            echo "❌ 第一个ISO下载失败！"
+            exit 1
+          fi
 
-      # 步骤4：批量下载ISO文件（保留原名，规避网关异常）
-      - name: 下载所有ISO文件
+      # 步骤4：下载第二个ISO文件（单独处理，更稳定）
+      - name: 下载第二个ISO文件
         run: |
-          # 遍历下载列表，逐个下载
-          for iso_url in "${{ env.ISO_LIST[@] }}"; do
-            # 从URL中提取原始文件名（最后一个/后的部分）
-            iso_filename=$(basename "$iso_url")
-            echo "开始下载：$iso_filename"
-            
-            # 带请求头+重试下载，强制保留原始文件名
-            curl -L -o "${iso_filename}" \
-              --retry 10 \
-              --retry-delay 15 \
-              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-              --header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
-              --header "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8" \
-              "$iso_url"
-            
-            # 验证文件是否下载成功
-            if [ -f "${iso_filename}" ]; then
-              echo "✅ $iso_filename 下载完成，文件大小：$(du -h "${iso_filename}" | awk '{print $1}')"
-            else
-              echo "❌ $iso_filename 下载失败！"
-              exit 1
-            fi
-          done
+          # 第二个ISO的链接和文件名
+          ISO_URL_2="https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66756/20348.1787.230607-0640.fe_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso"
+          ISO_NAME_2=$(basename "$ISO_URL_2")
+          
+          echo "=== 开始下载：$ISO_NAME_2 ==="
+          curl -L -o "$ISO_NAME_2" \
+            --retry 10 \
+            --retry-delay 15 \
+            --max-time 7200 \
+            -C - \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            "$ISO_URL_2"
+          
+          # 校验文件是否存在
+          if [ -f "$ISO_NAME_2" ]; then
+            echo "✅ 第二个ISO下载完成，大小：$(du -h "$ISO_NAME_2" | awk '{print $1}')"
+          else
+            echo "❌ 第二个ISO下载失败！"
+            exit 1
+          fi
 
-      # 步骤5：批量分卷压缩（每个ISO独立压缩，1950M/卷，保留原名）
-      - name: 7z分卷压缩所有ISO文件
+      # 步骤5：分卷压缩所有ISO（逐个处理，增加日志）
+      - name: 7z分卷压缩ISO文件（1950M/卷）
         run: |
-          # 遍历当前目录下所有ISO文件，逐个压缩
+          echo "=== 开始压缩所有ISO文件 ==="
+          # 遍历所有ISO文件
           for iso_file in *.iso; do
             if [ -f "$iso_file" ]; then
-              echo "开始压缩：$iso_file"
-              # 压缩后文件名 = 原ISO名.7z，分卷自动生成001/002后缀
+              echo "正在压缩：$iso_file"
               compress_name="${iso_file}.7z"
               
-              # 7z分卷压缩核心命令：1950M/卷、7z格式、最高压缩级别
-              7z a -v1950M -t7z -mx9 "${compress_name}" "${iso_file}"
+              # 7z压缩命令（简化参数，降低报错概率）
+              7z a -v1950M -t7z -mx5 "$compress_name" "$iso_file"
               
-              # 验证压缩分卷是否生成
+              # 校验分卷是否生成
               if ls "${iso_file}.7z."* 1> /dev/null 2>&1; then
-                echo "✅ $iso_file 压缩完成，分卷文件："
+                echo "✅ $iso_file 压缩完成，分卷列表："
                 ls -l "${iso_file}.7z."*
               else
                 echo "❌ $iso_file 压缩失败！"
@@ -77,18 +103,14 @@ jobs:
             fi
           done
 
-      # 步骤6：上传所有分卷文件到Releases
-      - name: 上传分卷文件到Server_2022-2025 Releases
-        uses: softprops/action-gh-release@v2
+      # 步骤6：上传到Releases（修复action版本和参数）
+      - name: 上传分卷到Server_2022-2025 Releases
+        uses: softprops/action-gh-release@v1  # 改用稳定的v1版本
         with:
-          # 指定Release标签（严格匹配你的项目名）
           tag_name: Server_2022-2025
-          # 覆盖已存在的同名文件（避免重复上传报错）
           overwrite: true
-          # 上传所有7z分卷文件（匹配所有ISO的分卷）
           files: |
             *.iso.7z.*
-          # 非草稿/预发布，直接发布
           draft: false
           prerelease: false
         env:
