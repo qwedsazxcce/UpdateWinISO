@@ -48,10 +48,10 @@ jobs:
           }
         shell: powershell
 
-      # 下载分卷（核心新增：带进度条的下载函数）
+      # 下载分卷（核心修复：变量引用+进度条函数）
       - name: Download ISO split archives
         run: |
-          # ========== 新增：带进度条的下载函数 ==========
+          # ========== 带进度条的下载函数 ==========
           function Download-FileWithProgress {
               [CmdletBinding()]
               param (
@@ -63,24 +63,20 @@ jobs:
               )
 
               try {
-                  # 创建WebClient对象，绑定进度事件
                   $webClient = New-Object System.Net.WebClient
                   $downloadComplete = $false
                   
-                  # 注册进度事件（每秒更新一次）
+                  # 注册进度事件
                   $eventHandler = Register-ObjectEvent -InputObject $webClient -EventName DownloadProgressChanged -Action {
-                      # 计算进度百分比和大小
                       $percent = $EventArgs.ProgressPercentage
                       $bytesReceived = [math]::Round($EventArgs.BytesReceived / 1MB, 2)
                       $totalBytes = [math]::Round($EventArgs.TotalBytesToReceive / 1MB, 2)
                       
-                      # 生成文本进度条（20个字符长度）
                       $progressBarLength = 20
                       $completedLength = [math]::Floor($percent / 100 * $progressBarLength)
                       $remainingLength = $progressBarLength - $completedLength
                       $progressBar = "[" + ("#" * $completedLength) + ("-" * $remainingLength) + "]"
                       
-                      # 输出进度（覆盖当前行，更整洁）
                       Write-Host "`rDownload progress: $progressBar $percent% | $bytesReceived MB / $totalBytes MB" -NoNewline
                   }
 
@@ -108,12 +104,10 @@ jobs:
                       throw "Download timed out after $TimeoutSec seconds"
                   }
 
-                  # 下载完成后输出换行
                   Write-Host "`nDownload completed: $($Url.Split('/')[-1])"
                   return $true
               } catch {
                   Write-Warning "Download failed: $($_.Exception.Message)"
-                  # 清理残留文件
                   if (Test-Path $OutputPath) {
                       Remove-Item $OutputPath -Force
                   }
@@ -121,7 +115,7 @@ jobs:
               }
           }
 
-          # ========== 原有下载分组配置 ==========
+          # ========== 下载分组配置 ==========
           $downloadGroups = @(
               @{
                   Name = "Win10LTSC2021_x86"
@@ -148,7 +142,7 @@ jobs:
               }
           )
 
-          # ========== 遍历下载分组（调用进度条函数） ==========
+          # ========== 遍历下载分组（修复变量引用） ==========
           foreach ($group in $downloadGroups) {
               $groupName = $group.Name
               Write-Host "`n=== Processing group: $groupName ==="
@@ -163,30 +157,31 @@ jobs:
                     continue
                   }
 
-                  # 下载重试逻辑（调用带进度条的函数）
+                  # 下载重试逻辑
                   $retryCount = 0
                   $maxRetries = 3
                   $downloadSuccess = $false
                   
                   while ($retryCount -lt $maxRetries -and -not $downloadSuccess) {
-                      Write-Host "`nDownload attempt $($retryCount + 1)/$maxRetries: $fileName"
+                      # 核心修复：用${}界定变量，避免:被识别为驱动器名
+                      Write-Host "`nDownload attempt $($retryCount + 1)/${maxRetries}: $fileName"
                       $downloadSuccess = Download-FileWithProgress -Url $url -OutputPath $savePath -TimeoutSec 300
                       
                       if (-not $downloadSuccess) {
                           $retryCount++
-                          Write-Warning "Download failed (attempt $retryCount/$maxRetries), retrying in 5 seconds..."
+                          Write-Warning "Download failed (attempt ${retryCount}/${maxRetries}), retrying in 5 seconds..."
                           Start-Sleep -Seconds 5
                       }
                   }
 
                   # 下载失败终止
                   if (-not $downloadSuccess) {
-                      Write-Error "Download failed after $maxRetries retries: $fileName"
+                      Write-Error "Download failed after ${maxRetries} retries: $fileName"
                       exit 1
                   }
               }
 
-              # ========== 原有解压/提取/导出逻辑（无修改） ==========
+              # ========== 解压/提取/导出逻辑 ==========
               Write-Host "Extracting split archives: $groupName"
               $7zFirstFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.001" | Where-Object { $_.Name -match $groupName } | Select-Object -First 1
               if (-not $7zFirstFile) {
@@ -253,7 +248,7 @@ jobs:
           }
         shell: powershell
 
-      # 转换WIM为ESD（无修改）
+      # 转换WIM为ESD
       - name: Convert WIM to ESD (recovery compression)
         run: |
           $targetWim = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
@@ -280,7 +275,7 @@ jobs:
           Write-Host "WIM to ESD convert success: $targetEsd"
         shell: powershell
 
-      # 分卷压缩ESD（无修改）
+      # 分卷压缩ESD
       - name: Split ESD into 1950MB volumes (7z)
         run: |
           $targetEsd = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
@@ -314,7 +309,7 @@ jobs:
           Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.*" | ForEach-Object { Write-Host " - $($_.Name)" }
         shell: powershell
 
-      # 发布到Releases（无修改）
+      # 发布到Releases
       - name: Publish split files to GitHub Releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -360,7 +355,7 @@ jobs:
           }
         shell: powershell
 
-      # 清理临时文件（无修改）
+      # 清理临时文件
       - name: Cleanup all temporary files
         if: always()
         run: |
