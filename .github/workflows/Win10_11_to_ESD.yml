@@ -1,0 +1,138 @@
+name: Win10_11_to_ESD
+@echo off
+chcp 65001 >nul
+setlocal enabledelayedexpansion
+
+:: ====================== 配置项 ======================
+:: 目标WIM/ESD文件名（注意空格需加引号）
+set "TARGET_WIM=Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
+set "TARGET_ESD=Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
+:: GitHub Releases发布的仓库名（格式：用户名/仓库名）
+set "GITHUB_REPO=qwedsazxcce/UpdateWinISO"
+:: 7-Zip路径（若安装路径不同，修改此处）
+set "7Z_PATH=C:\Program Files\7-Zip\7z.exe"
+:: 临时目录（用于解压/提取文件，脚本结束自动删除）
+set "TEMP_DIR=%cd%\Temp_Win_Image"
+md "%TEMP_DIR%" >nul 2>&1
+:: ====================== 配置项结束 ======================
+
+:: 定义需要处理的下载分组（每组对应一个ISO，格式：分组名|分卷链接1|分卷链接2|...）
+set "DOWNLOAD_GROUPS=(
+    Win10LTSC2021_x86|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
+    Win10LTSC2021_amd64|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
+    Win11LTSC2024_amd64|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
+)"
+
+:: 遍历每个下载分组
+for %%G in %DOWNLOAD_GROUPS% do (
+    :: 拆分分组名和链接（按|分割）
+    for /f "tokens=1,* delims=|" %%A in ("%%G") do (
+        set "GROUP_NAME=%%A"
+        set "LINKS=%%B"
+        echo.
+        echo ==============================================
+        echo 开始处理分组：!GROUP_NAME!
+        echo ==============================================
+
+        :: 步骤1：下载分卷压缩包到临时目录
+        echo [1/5] 下载分卷压缩包...
+        for %%L in (!LINKS!) do (
+            set "URL=%%L"
+            :: 提取文件名（从URL最后一个/后截取）
+            for /f "delims=/ tokens=*" %%F in ("!URL!") do set "FILE_NAME=%%F"
+            echo 正在下载：!FILE_NAME!
+            powershell -Command "(New-Object System.Net.WebClient).DownloadFile('!URL!', '%TEMP_DIR%\!FILE_NAME!')"
+            if errorlevel 1 (
+                echo 错误：下载!FILE_NAME!失败，退出脚本
+                goto CLEANUP
+            )
+        )
+
+        :: 步骤2：解压分卷压缩包（7z解压第一个分卷即可自动识别所有分卷）
+        echo [2/5] 解压分卷压缩包...
+        :: 找到第一个分卷（.7z.001）
+        for /f "delims=" %%F in ('dir /b "%TEMP_DIR%\*.7z.001"') do set "FIRST_7Z=%TEMP_DIR%\%%F"
+        "!7Z_PATH!" x -y -o"%TEMP_DIR%" "!FIRST_7Z!" >nul
+        if errorlevel 1 (
+            echo 错误：解压分卷失败，退出脚本
+            goto CLEANUP
+        )
+        :: 提取ISO文件名（临时目录下的.iso文件）
+        for /f "delims=" %%F in ('dir /b "%TEMP_DIR%\*.iso"') do set "ISO_FILE=%TEMP_DIR%\%%F"
+        echo 解压完成，ISO文件：!ISO_FILE!
+
+        :: 步骤3：从ISO中提取install.esd
+        echo [3/5] 从ISO提取install.esd...
+        "!7Z_PATH!" x -y -o"%TEMP_DIR%" "!ISO_FILE!" "sources/install.esd" >nul
+        if errorlevel 1 (
+            echo 错误：提取install.esd失败，退出脚本
+            goto CLEANUP
+        )
+        set "ESD_FILE=%TEMP_DIR%\sources\install.esd"
+        if not exist "!ESD_FILE!" (
+            echo 错误：未找到install.esd文件，退出脚本
+            goto CLEANUP
+        )
+
+        :: 步骤4：从install.esd导出第一个映像到目标WIM
+        echo [4/5] 导出第一个映像到!TARGET_WIM!...
+        if not exist "!TARGET_WIM!" (
+            :: 首次导出：创建新WIM
+            dism /export-image /sourceimagefile:"!ESD_FILE!" /sourceindex:1 /destinationimagefile:"!TARGET_WIM!" /compress:max /checkintegrity /quiet
+        ) else (
+            :: 后续导出：追加到现有WIM
+            dism /export-image /sourceimagefile:"!ESD_FILE!" /sourceindex:1 /destinationimagefile:"!TARGET_WIM!" /destinationindex:2 /compress:max /checkintegrity /quiet
+        )
+        if errorlevel 1 (
+            echo 错误：导出映像失败，退出脚本
+            goto CLEANUP
+        )
+
+        :: 步骤5：清理当前分组的临时文件（7z分卷、ISO、install.esd）
+        echo [5/5] 清理临时文件...
+        del /f /q "%TEMP_DIR%\*.7z.*" >nul
+        del /f /q "!ISO_FILE!" >nul
+        rd /s /q "%TEMP_DIR%\sources" >nul
+        echo 分组!GROUP_NAME!处理完成，临时文件已清理
+    )
+)
+
+:: 转换WIM为ESD（压缩率更高的recovery模式）
+echo.
+echo ==============================================
+echo 开始转换WIM为ESD...
+echo ==============================================
+dism /export-image /sourceimagefile:"%TARGET_WIM%" /sourceindex:all /destinationimagefile:"%TARGET_ESD%" /compress:recovery /checkintegrity /quiet
+if errorlevel 1 (
+    echo 错误：转换WIM为ESD失败
+    goto CLEANUP
+)
+echo WIM转ESD完成，生成文件：%TARGET_ESD%
+
+:: 发布到GitHub Releases
+echo.
+echo ==============================================
+echo 发布到GitHub Releases...
+echo ==============================================
+:: 创建Release（若已存在则跳过）
+gh release create "%TARGET_WIM%" "%TARGET_ESD%" --repo "%GITHUB_REPO%" --title "%TARGET_WIM%" --notes "自动构建的Windows LTSC镜像（WIM转ESD）"
+if errorlevel 1 (
+    echo 提示：Release可能已存在，尝试仅上传文件
+    gh release upload "%TARGET_WIM%" "%TARGET_ESD%" --repo "%GITHUB_REPO%"
+)
+echo 发布完成！
+
+:: 最终清理临时目录
+:CLEANUP
+echo.
+echo ==============================================
+echo 清理最终临时文件...
+echo ==============================================
+rd /s /q "%TEMP_DIR%" >nul
+if exist "%TARGET_WIM%" (
+    echo 保留目标文件：%TARGET_WIM%
+    echo 保留目标文件：%TARGET_ESD%
+)
+echo 脚本执行完成！
+pause
+exit /b 0
