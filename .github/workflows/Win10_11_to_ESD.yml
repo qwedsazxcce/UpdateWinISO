@@ -7,34 +7,54 @@ on:
 # 运行环境和任务配置
 jobs:
   build-esd:
-    # 使用Windows Server 2022 runner（自带DISM、PowerShell，兼容7-Zip）
+    # 使用Windows Server 2022 runner（兼容性最好）
     runs-on: windows-2022
+    # 设置超时时间（大文件处理需足够时间，默认360分钟）
+    timeout-minutes: 360
     
     steps:
       # 步骤1：检出仓库（可选，若无需仓库文件可注释）
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 步骤2：安装7-Zip（Windows runner默认已安装，若缺失则执行此步骤）
+      # 步骤2：安装7-Zip（优先用choco，比手动下载更稳定）
       - name: Install 7-Zip
         run: |
           if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) {
-            choco install 7zip -y
+            Write-Host "7-Zip未安装，开始通过choco安装..."
+            choco install 7zip -y --no-progress
+          } else {
+            Write-Host "7-Zip已安装"
           }
+        shell: powershell
 
-      # 步骤3：安装GitHub CLI（用于发布Release）
-      - name: Install GitHub CLI
+      # 步骤3：安装GitHub CLI（替换winget，改用choco，避免winget未识别问题）
+      - name: Install GitHub CLI (gh)
         run: |
-          winget install GitHub.cli -y --silent
+          if (-not (Get-Command "gh" -ErrorAction SilentlyContinue)) {
+            Write-Host "GitHub CLI未安装，开始通过choco安装..."
+            choco install gh -y --no-progress
+          } else {
+            Write-Host "GitHub CLI已安装"
+          }
+        shell: powershell
 
-      # 步骤4：创建临时目录，避免路径混乱
-      - name: Create temp directory
-        run: mkdir -Force $env:GITHUB_WORKSPACE\Temp_Win_Image
+      # 步骤4：创建临时目录（确保目录唯一，避免冲突）
+      - name: Create temporary directory
+        run: |
+          $tempDir = "$env:GITHUB_WORKSPACE\Temp_Win_Image"
+          if (-not (Test-Path $tempDir)) {
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+            Write-Host "临时目录创建成功：$tempDir"
+          } else {
+            Write-Host "临时目录已存在：$tempDir"
+          }
+        shell: powershell
 
-      # 步骤5：批量下载分卷压缩包（对应你之前的3组文件）
+      # 步骤5：批量下载分卷压缩包（增加下载失败重试+存在性检查）
       - name: Download ISO split archives
         run: |
-          # 定义下载链接（按组分类）
+          # 定义下载分组（结构化配置，便于维护）
           $downloadGroups = @(
               @{
                   Name = "Win10LTSC2021_x86"
@@ -61,104 +81,244 @@ jobs:
               }
           )
 
-          # 遍历下载每组分卷
+          # 遍历每个分组下载
           foreach ($group in $downloadGroups) {
-              Write-Host "=== 下载分组：$($group.Name) ==="
+              $groupName = $group.Name
+              Write-Host "`n=== 开始处理分组：$groupName ==="
+              
+              # 下载每个分卷（重试3次）
               foreach ($url in $group.Urls) {
                   $fileName = $url.Split('/')[-1]
                   $savePath = "$env:GITHUB_WORKSPACE\Temp_Win_Image\$fileName"
-                  Write-Host "下载：$fileName"
-                  Invoke-WebRequest -Uri $url -OutFile $savePath -UseBasicParsing
+                  
+                  # 检查文件是否已存在，避免重复下载
+                  if (Test-Path $savePath) {
+                    Write-Host "文件已存在，跳过下载：$fileName"
+                    continue
+                  }
+
+                  # 下载重试逻辑
+                  $retryCount = 0
+                  $maxRetries = 3
+                  $downloadSuccess = $false
+                  
+                  while ($retryCount -lt $maxRetries -and -not $downloadSuccess) {
+                      try {
+                          Write-Host "下载中（重试$retryCount）：$fileName"
+                          Invoke-WebRequest -Uri $url -OutFile $savePath -UseBasicParsing -TimeoutSec 300 -ErrorAction Stop
+                          $downloadSuccess = $true
+                          Write-Host "下载成功：$fileName"
+                      } catch {
+                          $retryCount++
+                          Write-Warning "下载失败（重试$retryCount/$maxRetries）：$($_.Exception.Message)"
+                          Start-Sleep -Seconds 5
+                      }
+                  }
+
+                  # 下载失败则终止脚本
+                  if (-not $downloadSuccess) {
+                      Write-Error "文件下载失败（超出最大重试次数）：$fileName"
+                      exit 1
+                  }
               }
 
-              # 解压分卷（只需解压.001文件，7-Zip自动识别所有分卷）
-              Write-Host "=== 解压分组：$($group.Name) ==="
-              $7zFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.001" | Select-Object -First 1
-              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$env:GITHUB_WORKSPACE\Temp_Win_Image" $7zFile.FullName | Out-Null
+              # 解压分卷（仅解压001文件，7-Zip自动识别所有分卷）
+              Write-Host "解压分卷文件：$groupName"
+              $7zFirstFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.001" | Where-Object { $_.Name -match $groupName } | Select-Object -First 1
+              if (-not $7zFirstFile) {
+                  Write-Error "未找到$groupName的7z分卷起始文件（.7z.001）"
+                  exit 1
+              }
+
+              # 执行解压
+              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$env:GITHUB_WORKSPACE\Temp_Win_Image" $7zFirstFile.FullName | Out-Null
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Error "$groupName分卷解压失败（7-Zip退出码：$LASTEXITCODE）"
+                  exit 1
+              }
+              Write-Host "$groupName分卷解压成功"
 
               # 提取ISO中的install.esd
-              Write-Host "=== 提取install.esd ==="
-              $isoFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.iso" | Select-Object -First 1
-              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$env:GITHUB_WORKSPACE\Temp_Win_Image" $isoFile.FullName "sources/install.esd" | Out-Null
-
-              # 导出第一个映像到目标WIM
-              Write-Host "=== 导出映像到WIM ==="
-              $esdFile = "$env:GITHUB_WORKSPACE\Temp_Win_Image\sources\install.esd"
-              $targetWim = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
-              
-              if (-not (Test-Path $targetWim)) {
-                  # 首次导出：创建新WIM
-                  dism /export-image /sourceimagefile:$esdFile /sourceindex:1 /destinationimagefile:$targetWim /compress:max /checkintegrity /quiet
-              } else {
-                  # 后续导出：追加到WIM（自动分配新索引）
-                  dism /export-image /sourceimagefile:$esdFile /sourceindex:1 /destinationimagefile:$targetWim /compress:max /checkintegrity /quiet
+              Write-Host "提取install.esd文件：$groupName"
+              $isoFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.iso" | Where-Object { $_.Name -match $groupName } | Select-Object -First 1
+              if (-not $isoFile) {
+                  Write-Error "未找到$groupName的ISO文件"
+                  exit 1
               }
 
+              # 解压ISO中的sources/install.esd
+              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$env:GITHUB_WORKSPACE\Temp_Win_Image" $isoFile.FullName "sources/install.esd" | Out-Null
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Error "$groupName的ISO中未找到install.esd"
+                  exit 1
+              }
+
+              # 验证install.esd是否存在
+              $esdFile = "$env:GITHUB_WORKSPACE\Temp_Win_Image\sources\install.esd"
+              if (-not (Test-Path $esdFile)) {
+                  Write-Error "install.esd提取失败：$esdFile不存在"
+                  exit 1
+              }
+              Write-Host "install.esd提取成功：$esdFile"
+
+              # 导出ESD第一个映像到WIM文件
+              Write-Host "导出第一个映像到WIM文件：$groupName"
+              $targetWim = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
+              $dismArgs = @(
+                  "/export-image",
+                  "/sourceimagefile:$esdFile",
+                  "/sourceindex:1",
+                  "/destinationimagefile:$targetWim",
+                  "/compress:max",
+                  "/checkintegrity",
+                  "/quiet"
+              )
+
+              # 首次导出创建WIM，后续追加
+              if (-not (Test-Path $targetWim)) {
+                  dism @dismArgs
+              } else {
+                  dism @dismArgs + @("/destinationindex:2")
+              }
+
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Error "$groupName映像导出失败（DISM退出码：$LASTEXITCODE）"
+                  exit 1
+              }
+              Write-Host "$groupName映像导出成功"
+
               # 清理当前分组临时文件（节约空间）
-              Write-Host "=== 清理临时文件 ==="
-              Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.*" -Force
-              Remove-Item $isoFile.FullName -Force
-              Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image\sources" -Recurse -Force
+              Write-Host "清理$groupName临时文件"
+              Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.*" -Force -ErrorAction SilentlyContinue
+              Remove-Item $isoFile.FullName -Force -ErrorAction SilentlyContinue
+              Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image\sources" -Recurse -Force -ErrorAction SilentlyContinue
+              Write-Host "$groupName临时文件清理完成"
           }
         shell: powershell
 
-      # 步骤6：转换WIM为ESD
-      - name: Convert WIM to ESD
+      # 步骤6：转换WIM为ESD（高压缩率recovery模式）
+      - name: Convert WIM to ESD (recovery compression)
         run: |
           $targetWim = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
           $targetEsd = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
-          dism /export-image /sourceimagefile:$targetWim /sourceindex:all /destinationimagefile:$targetEsd /compress:recovery /checkintegrity /quiet
-        shell: powershell
-
-      # ========== 新增：分卷压缩ESD文件（1950MB/卷） ==========
-      - name: Split ESD file into 1950MB volumes
-        run: |
-          $targetEsd = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
-          $splitOutput = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z"
           
-          # 7-Zip分卷压缩：-v1950m 表示每个分卷1950MB，-t7z 指定7z格式，-mx9 最高压缩率
-          & "C:\Program Files\7-Zip\7z.exe" a -t7z -mx9 -v1950m $splitOutput $targetEsd
-          
-          # 验证分卷文件是否生成
-          $splitFiles = Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.001"
-          if (-not $splitFiles) {
-              Write-Error "分卷压缩失败，未生成分卷文件！"
+          # 检查WIM文件是否存在
+          if (-not (Test-Path $targetWim)) {
+              Write-Error "目标WIM文件不存在：$targetWim"
               exit 1
           }
-          Write-Host "分卷压缩完成，生成文件："
-          Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.*" | ForEach-Object { Write-Host $_.Name }
+
+          Write-Host "开始转换WIM为ESD（recovery压缩）"
+          dism /export-image `
+              /sourceimagefile:$targetWim `
+              /sourceindex:all `
+              /destinationimagefile:$targetEsd `
+              /compress:recovery `
+              /checkintegrity `
+              /quiet
+
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "WIM转ESD失败（DISM退出码：$LASTEXITCODE）"
+              exit 1
+          }
+          Write-Host "WIM转ESD成功：$targetEsd"
         shell: powershell
 
-      # ========== 修改：发布分卷文件到Releases（替代原ESD文件） ==========
+      # 步骤7：分卷压缩ESD为1950MB/卷（7-Zip高压缩）
+      - name: Split ESD into 1950MB volumes (7z)
+        run: |
+          $targetEsd = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
+          $splitPrefix = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z"
+          
+          # 检查ESD文件是否存在
+          if (-not (Test-Path $targetEsd)) {
+              Write-Error "目标ESD文件不存在：$targetEsd"
+              exit 1
+          }
+
+          Write-Host "分卷压缩ESD（1950MB/卷）"
+          & "C:\Program Files\7-Zip\7z.exe" a `
+              -t7z `          # 指定7z格式
+              -mx9 `          # 最高压缩率
+              -v1950m `       # 1950MB/卷
+              -bb1 `          # 显示基础进度
+              $splitPrefix `
+              $targetEsd
+
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "ESD分卷压缩失败（7-Zip退出码：$LASTEXITCODE）"
+              exit 1
+          }
+
+          # 验证分卷文件
+          $splitFiles = Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.001"
+          if (-not $splitFiles) {
+              Write-Error "未生成分卷文件"
+              exit 1
+          }
+          Write-Host "分卷压缩成功，生成文件："
+          Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.*" | ForEach-Object { Write-Host " - $($_.Name)" }
+        shell: powershell
+
+      # 步骤8：发布分卷文件到GitHub Releases
       - name: Publish split files to GitHub Releases
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动生成的令牌，无需手动配置
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $releaseName = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025"
           $splitFiles = Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.*" | Sort-Object Name
           
-          # 登录GitHub CLI（使用内置令牌）
-          gh auth login --with-token <<< $env:GITHUB_TOKEN
+          # 检查分卷文件
+          if (-not $splitFiles) {
+              Write-Error "无分卷文件可发布"
+              exit 1
+          }
+
+          # 登录GitHub CLI
+          Write-Host "登录GitHub CLI..."
+          echo $env:GITHUB_TOKEN | gh auth login --with-token
           
-          # 创建Release（若已存在则更新）
+          # 检查Release是否存在
+          $releaseExists = $false
           if (gh release view $releaseName 2>$null) {
-              # 覆盖已存在的分卷文件
+              $releaseExists = $true
+              Write-Host "Release已存在：$releaseName，将覆盖现有文件"
+          } else {
+              Write-Host "Release不存在，将创建新Release：$releaseName"
+          }
+
+          # 发布分卷文件
+          if ($releaseExists) {
               foreach ($file in $splitFiles) {
                   gh release upload $releaseName $file.FullName --clobber
+                  if ($LASTEXITCODE -ne 0) {
+                      Write-Error "上传分卷失败：$($file.Name)"
+                      exit 1
+                  }
+                  Write-Host "上传成功：$($file.Name)"
               }
           } else {
-              # 新建Release并上传所有分卷
-              gh release create $releaseName $splitFiles.FullName --title $releaseName --notes "Auto-built Windows LTSC ESD (split into 1950MB volumes)"
+              gh release create $releaseName `
+                  $splitFiles.FullName `
+                  --title $releaseName `
+                  --notes "Auto-built Windows LTSC ESD (split into 1950MB volumes)"
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Error "创建Release并上传失败"
+                  exit 1
+              }
+              Write-Host "新Release创建并上传成功"
           }
         shell: powershell
 
-      # 步骤8：清理所有临时文件（包含原ESD和临时目录）
-      - name: Cleanup temp files
-        if: always()  # 无论前面步骤是否失败，都执行清理
+      # 步骤9：清理所有临时文件（无论成败都执行）
+      - name: Cleanup all temporary files
+        if: always()
         run: |
+          Write-Host "开始清理所有临时文件..."
           # 清理临时目录
           Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image" -Recurse -Force -ErrorAction SilentlyContinue
-          # 可选：保留分卷文件，删除原ESD和WIM（节约空间）
+          # 清理原WIM/ESD文件（仅保留分卷）
           Remove-Item "$env:GITHUB_WORKSPACE\*.wim" -Force -ErrorAction SilentlyContinue
           Remove-Item "$env:GITHUB_WORKSPACE\*.esd" -Force -ErrorAction SilentlyContinue
+          Write-Host "临时文件清理完成"
         shell: powershell
