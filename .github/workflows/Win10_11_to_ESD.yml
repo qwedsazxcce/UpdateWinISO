@@ -1,10 +1,9 @@
 name: Windows_LTSC_ESD
 
-# 触发条件：手动触发（workflow_dispatch），也可添加push/tag触发
+# 触发条件：手动触发
 on:
   workflow_dispatch:
 
-# 运行环境和任务配置
 jobs:
   build-esd:
     runs-on: windows-2022
@@ -14,7 +13,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 安装7-Zip（英文日志，避免乱码）
+      # 安装7-Zip（英文日志）
       - name: Install 7-Zip
         run: |
           if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) {
@@ -25,7 +24,7 @@ jobs:
           }
         shell: powershell
 
-      # 安装GitHub CLI（替换winget，英文日志）
+      # 安装GitHub CLI
       - name: Install GitHub CLI (gh)
         run: |
           if (-not (Get-Command "gh" -ErrorAction SilentlyContinue)) {
@@ -36,7 +35,7 @@ jobs:
           }
         shell: powershell
 
-      # 创建临时目录（英文日志）
+      # 创建临时目录
       - name: Create temporary directory
         run: |
           $tempDir = "$env:GITHUB_WORKSPACE\Temp_Win_Image"
@@ -48,74 +47,10 @@ jobs:
           }
         shell: powershell
 
-      # 下载分卷（核心修复：变量引用+进度条函数）
-      - name: Download ISO split archives
+      # 核心修改：用curl下载（带进度+重试）
+      - name: Download ISO split archives (curl)
         run: |
-          # ========== 带进度条的下载函数 ==========
-          function Download-FileWithProgress {
-              [CmdletBinding()]
-              param (
-                  [Parameter(Mandatory=$true)]
-                  [string]$Url,
-                  [Parameter(Mandatory=$true)]
-                  [string]$OutputPath,
-                  [int]$TimeoutSec = 300
-              )
-
-              try {
-                  $webClient = New-Object System.Net.WebClient
-                  $downloadComplete = $false
-                  
-                  # 注册进度事件
-                  $eventHandler = Register-ObjectEvent -InputObject $webClient -EventName DownloadProgressChanged -Action {
-                      $percent = $EventArgs.ProgressPercentage
-                      $bytesReceived = [math]::Round($EventArgs.BytesReceived / 1MB, 2)
-                      $totalBytes = [math]::Round($EventArgs.TotalBytesToReceive / 1MB, 2)
-                      
-                      $progressBarLength = 20
-                      $completedLength = [math]::Floor($percent / 100 * $progressBarLength)
-                      $remainingLength = $progressBarLength - $completedLength
-                      $progressBar = "[" + ("#" * $completedLength) + ("-" * $remainingLength) + "]"
-                      
-                      Write-Host "`rDownload progress: $progressBar $percent% | $bytesReceived MB / $totalBytes MB" -NoNewline
-                  }
-
-                  # 开始下载
-                  Write-Host "`nStarting download: $($Url.Split('/')[-1])"
-                  $webClient.DownloadFileAsync($Url, $OutputPath)
-                  
-                  # 等待下载完成或超时
-                  $timer = [System.Diagnostics.Stopwatch]::StartNew()
-                  while (-not $downloadComplete -and $timer.Elapsed.TotalSeconds -lt $TimeoutSec) {
-                      if ($webClient.IsBusy) {
-                          Start-Sleep -Milliseconds 500
-                      } else {
-                          $downloadComplete = $true
-                      }
-                  }
-                  $timer.Stop()
-
-                  # 清理事件和对象
-                  Unregister-Event -SubscriptionId $eventHandler.Id -Force
-                  $webClient.Dispose()
-
-                  # 检查超时
-                  if (-not $downloadComplete) {
-                      throw "Download timed out after $TimeoutSec seconds"
-                  }
-
-                  Write-Host "`nDownload completed: $($Url.Split('/')[-1])"
-                  return $true
-              } catch {
-                  Write-Warning "Download failed: $($_.Exception.Message)"
-                  if (Test-Path $OutputPath) {
-                      Remove-Item $OutputPath -Force
-                  }
-                  return $false
-              }
-          }
-
-          # ========== 下载分组配置 ==========
+          # 定义下载分组
           $downloadGroups = @(
               @{
                   Name = "Win10LTSC2021_x86"
@@ -142,7 +77,7 @@ jobs:
               }
           )
 
-          # ========== 遍历下载分组（修复变量引用） ==========
+          # 遍历下载分组
           foreach ($group in $downloadGroups) {
               $groupName = $group.Name
               Write-Host "`n=== Processing group: $groupName ==="
@@ -157,19 +92,39 @@ jobs:
                     continue
                   }
 
-                  # 下载重试逻辑
+                  # curl下载逻辑（带进度+重试）
                   $retryCount = 0
                   $maxRetries = 3
                   $downloadSuccess = $false
                   
                   while ($retryCount -lt $maxRetries -and -not $downloadSuccess) {
-                      # 核心修复：用${}界定变量，避免:被识别为驱动器名
-                      Write-Host "`nDownload attempt $($retryCount + 1)/${maxRetries}: $fileName"
-                      $downloadSuccess = Download-FileWithProgress -Url $url -OutputPath $savePath -TimeoutSec 300
+                      Write-Host "`nDownload attempt ${retryCount + 1}/${maxRetries}: $fileName"
                       
-                      if (-not $downloadSuccess) {
+                      # Windows下curl.exe参数说明：
+                      # -L：跟随重定向（GitHub Release链接可能重定向）
+                      # -o：指定输出文件路径
+                      # --progress-bar：显示可视化进度条（替代默认的进度百分比）
+                      # --retry：重试次数（兜底，外层已做重试，这里双重保障）
+                      # --retry-delay：重试延迟5秒
+                      # --connect-timeout：连接超时30秒
+                      # --max-time：整体下载超时600秒（10分钟）
+                      curl.exe -L -o "$savePath" `
+                          --progress-bar `
+                          --retry 2 `
+                          --retry-delay 5 `
+                          --connect-timeout 30 `
+                          --max-time 600 `
+                          $url
+                      
+                      # 检查curl退出码（0=成功）
+                      if ($LASTEXITCODE -eq 0) {
+                          $downloadSuccess = $true
+                          Write-Host "`nDownload success: $fileName"
+                      } else {
                           $retryCount++
-                          Write-Warning "Download failed (attempt ${retryCount}/${maxRetries}), retrying in 5 seconds..."
+                          Write-Warning "Download failed (curl exit code: $LASTEXITCODE), attempt ${retryCount}/${maxRetries}, retrying in 5 seconds..."
+                          # 清理不完整文件
+                          if (Test-Path $savePath) { Remove-Item $savePath -Force }
                           Start-Sleep -Seconds 5
                       }
                   }
@@ -181,7 +136,7 @@ jobs:
                   }
               }
 
-              # ========== 解压/提取/导出逻辑 ==========
+              # ========== 原有解压/提取/导出逻辑（无修改） ==========
               Write-Host "Extracting split archives: $groupName"
               $7zFirstFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.001" | Where-Object { $_.Name -match $groupName } | Select-Object -First 1
               if (-not $7zFirstFile) {
@@ -248,7 +203,7 @@ jobs:
           }
         shell: powershell
 
-      # 转换WIM为ESD
+      # 转换WIM为ESD（无修改）
       - name: Convert WIM to ESD (recovery compression)
         run: |
           $targetWim = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
@@ -275,7 +230,7 @@ jobs:
           Write-Host "WIM to ESD convert success: $targetEsd"
         shell: powershell
 
-      # 分卷压缩ESD
+      # 分卷压缩ESD（无修改）
       - name: Split ESD into 1950MB volumes (7z)
         run: |
           $targetEsd = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
@@ -309,7 +264,7 @@ jobs:
           Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.*" | ForEach-Object { Write-Host " - $($_.Name)" }
         shell: powershell
 
-      # 发布到Releases
+      # 发布到Releases（无修改）
       - name: Publish split files to GitHub Releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -355,7 +310,7 @@ jobs:
           }
         shell: powershell
 
-      # 清理临时文件
+      # 清理临时文件（无修改）
       - name: Cleanup all temporary files
         if: always()
         run: |
