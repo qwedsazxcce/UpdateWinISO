@@ -1,111 +1,118 @@
 name: Windows_LTSC_ESD
 
-# 手动触发工作流（推荐，避免误触发）
 on:
   workflow_dispatch:
 
-# 全局环境变量（集中管理，方便后续替换）
 env:
-  # 第一组：Windows10 LTSC2021 x86
   DOWNLOAD_URLS_1: >
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001,
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
   
-  # 第二组：Windows10 LTSC2021 amd64
   DOWNLOAD_URLS_2: >
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001,
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002,
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
   
-  # 第三组：Windows11 LTSC2024 amd64
   DOWNLOAD_URLS_3: >
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001,
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002,
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
 
-  # 核心目标文件名（统一管理）
   TARGET_WIM: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim
   TARGET_ESD: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd
-  # 分卷压缩大小（1950M）
   SPLIT_SIZE: 1950M
 
 jobs:
   build-esd:
-    runs-on: windows-latest  # 使用GitHub Windows最新版Runner
-    timeout-minutes: 180     # 延长超时时间（大文件处理耗时）
+    runs-on: windows-latest
+    timeout-minutes: 180
     steps:
-      # 1. 检出仓库（基础步骤，确保工作目录可用）
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. 安装7-Zip（Windows Runner默认无7z，需手动安装）
+      # 修复7-Zip安装和版本验证逻辑
       - name: Install 7-Zip
         shell: powershell
         run: |
-          if (-not (Get-Command "7z" -ErrorAction SilentlyContinue)) {
-              Write-Host "Installing 7-Zip via Chocolatey..."
+          # 检查7-Zip是否已安装（优先找默认路径）
+          $7zPath = @(
+              "C:\Program Files\7-Zip\7z.exe",
+              "C:\Program Files (x86)\7-Zip\7z.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if (-not $7zPath) {
+              Write-Host "7-Zip not found, installing via Chocolatey..."
+              # 确保Chocolatey可用
+              if (-not (Get-Command "choco" -ErrorAction SilentlyContinue)) {
+                  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                  Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+              }
               choco install 7zip -y --no-progress
-              $env:PATH += ";C:\Program Files\7-Zip"
+              # 重新获取安装后的路径
+              $7zPath = "C:\Program Files\7-Zip\7z.exe"
+              $env:PATH += ";$(Split-Path $7zPath -Parent)"
               [Environment]::SetEnvironmentVariable("PATH", $env:PATH, "Process")
           }
-          # 验证7-Zip安装
-          7z --version | Out-Host
-          Write-Host "7-Zip installed successfully!"
 
-      # 3. 定义核心处理函数（复用逻辑，处理每组下载/解压/提取）
+          # 验证7-Zip（使用7-Zip原生参数-v查看版本）
+          Write-Host "Verifying 7-Zip installation..."
+          & $7zPath -v | Out-Host
+          if ($LASTEXITCODE -ne 0) {
+              throw "7-Zip verification failed"
+          }
+          Write-Host "7-Zip installed successfully at: $7zPath"
+
       - name: Define Processing Function
         shell: powershell
         run: |
-          # 定义可复用的处理函数：下载→解压→提取ESD→导出映像→清理临时文件
           function Process-ISO {
               param(
-                  [string[]]$Urls,       # 下载链接数组
-                  [string]$TargetWimPath # 目标WIM文件路径
+                  [string[]]$Urls,
+                  [string]$TargetWimPath
               )
 
-              # 创建唯一临时目录（避免冲突）
               $tempRoot = New-Item -Path "$env:GITHUB_WORKSPACE\temp_$(Get-Random)" -ItemType Directory -Force
               $dlDir = New-Item -Path "$tempRoot\downloads" -ItemType Directory -Force
               $extractDir = New-Item -Path "$tempRoot\extract" -ItemType Directory -Force
 
               try {
-                  # ========== 1. 下载文件（curl带进度/速度） ==========
+                  # 修复curl进度显示：Windows下curl用--progress-bar更稳定
                   foreach ($url in $Urls) {
-                      $fileName = [System.IO.Path]::GetFileName($url.Trim())
+                      $url = $url.Trim()
+                      if (-not $url) { continue }
+                      $fileName = [System.IO.Path]::GetFileName($url)
                       $output = "$dlDir\$fileName"
                       Write-Host "`nDownloading: $fileName"
-                      # curl参数说明：-L(跟随重定向) -#(进度条) -o(输出文件)
-                      curl -L -# -o "$output" "$url"
+                      # 使用--progress-bar显示实时进度/速度，-f确保失败时返回错误
+                      curl.exe --progress-bar -L -f -o "$output" "$url"
                       
                       if (-not (Test-Path $output)) { throw "Download failed: $fileName" }
                       Write-Host "Download completed: $fileName"
                   }
 
-                  # ========== 2. 解压7z分卷 ==========
                   $7zFirst = Get-ChildItem -Path $dlDir -Filter "*.7z.001" | Select-Object -First 1
                   if (-not $7zFirst) { throw "No 7z volume found (*.7z.001)" }
                   Write-Host "Extracting 7z: $($7zFirst.Name)"
                   7z x -y -o"$extractDir" "$($7zFirst.FullName)" | Out-Host
+                  if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) { # 7z解压非致命警告返回1，正常
+                      throw "7z extraction failed for $($7zFirst.Name)"
+                  }
 
-                  # ========== 3. 从ISO提取install.esd ==========
-                  $isoFile = Get-ChildItem -Path $extractDir -Filter "*.iso" | Select-Object -First 1
+                  $isoFile = Get-ChildItem -Path $extractDir -Filter "*.iso" -Recurse | Select-Object -First 1
                   if (-not $isoFile) { throw "No ISO file found after extraction" }
                   $isoExtract = New-Item -Path "$tempRoot\iso_extract" -ItemType Directory -Force
                   Write-Host "Extracting install.esd from ISO: $($isoFile.Name)"
                   7z x -y -o"$isoExtract" "$($isoFile.FullName)" "sources\install.esd" | Out-Host
                   
                   $esdFile = "$isoExtract\sources\install.esd"
-                  if (-not (Test-Path $esdFile)) { throw "install.esd not found in ISO" }
+                  if (-not (Test-Path $esdFile)) { throw "install.esd not found in ISO: $esdFile" }
 
-                  # ========== 4. 提取第一个映像到WIM ==========
                   Write-Host "Exporting image 1 from ESD to WIM..."
                   if (-not (Test-Path $TargetWimPath)) {
-                      # 首次创建WIM
                       dism /Export-Image /SourceImageFile:"$esdFile" /SourceIndex:1 `
                           /DestinationImageFile:"$TargetWimPath" /Compress:max /CheckIntegrity | Out-Host
                   } else {
-                      # 追加映像到已有WIM（自动计算下一个索引）
-                      $imgCount = (dism /Get-WimInfo /WimFile:"$TargetWimPath" | Select-String "Image Index\:\s+(\d+)" | Measure-Object).Count + 1
+                      $imgCount = (dism /Get-WimInfo /WimFile:"$TargetWimPath" 2>&1 | Select-String "Image Index\:\s+(\d+)" | Measure-Object).Count + 1
                       dism /Export-Image /SourceImageFile:"$esdFile" /SourceIndex:1 `
                           /DestinationImageFile:"$TargetWimPath" /DestinationIndex:$imgCount /Compress:max /CheckIntegrity | Out-Host
                   }
@@ -115,27 +122,29 @@ jobs:
 
               } catch {
                   Write-Error "Processing failed: $_"
-                  throw $_  # 抛出错误终止工作流
+                  throw $_
               } finally {
-                  # ========== 5. 强制清理临时文件（关键：节约空间） ==========
                   Write-Host "Cleaning temp files: $tempRoot"
+                  # 强制删除（处理文件占用问题）
                   Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+                  # 额外清理可能残留的挂载ISO
+                  $mounted = dism /Get-MountedWimInfo 2>&1 | Select-String "Mount Directory"
+                  if ($mounted) {
+                      dism /Unmount-Wim /MountDir:$($mounted -split ':' | Select-Object -Last 1 | ForEach-Object { $_.Trim() }) /Discard | Out-Host
+                  }
               }
           }
 
-          # 保存函数到文件（后续步骤可调用）
           Set-Content -Path "$env:GITHUB_WORKSPACE\process_func.ps1" -Value (Get-Content function:Process-ISO | Out-String)
 
-      # 4. 处理第一组：Windows10 LTSC2021 x86
       - name: Process Windows10 LTSC2021 x86
         shell: powershell
         run: |
-          . "$env:GITHUB_WORKSPACE\process_func.ps1"  # 加载函数
+          . "$env:GITHUB_WORKSPACE\process_func.ps1"
           $urls = $env:DOWNLOAD_URLS_1 -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
           $targetWim = "$env:GITHUB_WORKSPACE\$env:TARGET_WIM"
           Process-ISO -Urls $urls -TargetWimPath $targetWim
 
-      # 5. 处理第二组：Windows10 LTSC2021 amd64
       - name: Process Windows10 LTSC2021 amd64
         shell: powershell
         run: |
@@ -144,7 +153,6 @@ jobs:
           $targetWim = "$env:GITHUB_WORKSPACE\$env:TARGET_WIM"
           Process-ISO -Urls $urls -TargetWimPath $targetWim
 
-      # 6. 处理第三组：Windows11 LTSC2024 amd64
       - name: Process Windows11 LTSC2024 amd64
         shell: powershell
         run: |
@@ -153,7 +161,6 @@ jobs:
           $targetWim = "$env:GITHUB_WORKSPACE\$env:TARGET_WIM"
           Process-ISO -Urls $urls -TargetWimPath $targetWim
 
-      # 7. 转换WIM为ESD（Recovery压缩级别，ESD特有）
       - name: Convert WIM to ESD
         shell: powershell
         run: |
@@ -161,8 +168,7 @@ jobs:
           $esdFile = "$env:GITHUB_WORKSPACE\$env:TARGET_ESD"
 
           Write-Host "Converting WIM to ESD (recovery compression)..."
-          # 导出所有映像到ESD
-          $imgCount = (dism /Get-WimInfo /WimFile:"$wimFile" | Select-String "Image Index\:\s+(\d+)" | Measure-Object).Count
+          $imgCount = (dism /Get-WimInfo /WimFile:"$wimFile" 2>&1 | Select-String "Image Index\:\s+(\d+)" | Measure-Object).Count
           for ($i=1; $i -le $imgCount; $i++) {
               if ($i -eq 1) {
                   dism /Export-Image /SourceImageFile:"$wimFile" /SourceIndex:$i `
@@ -171,14 +177,15 @@ jobs:
                   dism /Export-Image /SourceImageFile:"$wimFile" /SourceIndex:$i `
                       /DestinationImageFile:"$esdFile" /DestinationIndex:$i /Compress:recovery /CheckIntegrity | Out-Host
               }
+              if ($LASTEXITCODE -ne 0) {
+                  throw "ESD conversion failed for image index $i"
+              }
           }
 
           if (-not (Test-Path $esdFile)) { throw "ESD conversion failed" }
-          # 删除原WIM文件
           Remove-Item -Path $wimFile -Force
           Write-Host "WIM converted to ESD successfully!"
 
-      # 8. 1950M分卷压缩ESD
       - name: Split ESD to Volumes (1950M)
         shell: powershell
         run: |
@@ -186,37 +193,36 @@ jobs:
           $splitPrefix = "$esdFile.7z"
 
           Write-Host "Splitting ESD to $env:SPLIT_SIZE volumes..."
-          # 7z分卷参数：-v(分卷大小) -y(自动确认)
           7z a -y -v$env:SPLIT_SIZE "$splitPrefix" "$esdFile" | Out-Host
+          if ($LASTEXITCODE -ne 0) {
+              throw "7z split failed with exit code $LASTEXITCODE"
+          }
 
-          # 验证分卷文件
           $splitFiles = Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Filter "$($env:TARGET_ESD).7z.*"
           if (-not $splitFiles) { throw "Split failed: no volume files found" }
           Write-Host "Split completed: $($splitFiles.Name -join ', ')"
 
-          # 删除原ESD文件
           Remove-Item -Path $esdFile -Force
           Write-Host "Original ESD file deleted!"
 
-      # 9. 发布到Releases（Tag与目标文件名一致）
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.TARGET_WIM }}  # Tag名与目标WIM名一致
-          name: ${{ env.TARGET_WIM }}      # Release名称
+          tag_name: ${{ env.TARGET_WIM }}
+          name: ${{ env.TARGET_WIM }}
           files: |
-            ${{ github.workspace }}/${{ env.TARGET_ESD }}.7z.*  # 上传所有分卷文件
+            ${{ github.workspace }}/${{ env.TARGET_ESD }}.7z.*
           draft: false
           prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub默认提供的Token
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 10. 最终清理（无论成功/失败都执行）
       - name: Final Cleanup
         if: always()
         shell: powershell
         run: |
-          # 清理所有临时目录和残留文件
           Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Filter "temp_*" -Directory | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
           Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Filter "process_func.ps1" | Remove-Item -Force -ErrorAction SilentlyContinue
+          # 清理7z分卷外的临时文件
+          Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Exclude "$($env:TARGET_ESD).7z.*" -File | Where-Object { $_.Extension -in '.wim','.esd','.iso','.7z' } | Remove-Item -Force -ErrorAction SilentlyContinue
           Write-Host "All temp files cleaned up!"
