@@ -1,139 +1,317 @@
 name: Windows_LTSC_ESD
 
 env:
-  WIN10_LTSC_X86_URLS: 'https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001;https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002'
-  WIN10_LTSC_AMD64_URLS: 'https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001;https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002;https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003'
-  WIN11_LTSC_AMD64_URLS: 'https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001;https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002;https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003'
-  TARGET_WIM: 'Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim'
-  TARGET_ESD: 'Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd'
-  RELEASE_NAME: 'Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025'
+  # 下载地址变量定义（方便后续替换）
+  WIN10_X86_URLS: |
+    https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
+    https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
+    
+  WIN10_AMD64_URLS: |
+    https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001
+    https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002
+    https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
+    
+  WIN11_AMD64_URLS: |
+    https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001
+    https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
+    https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
+  
+  OUTPUT_WIM: "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
+  OUTPUT_ESD: "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
+  RELEASE_NAME: "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025"
+  RELEASE_TAG: "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025"
+
+on:
+  workflow_dispatch:  # 手动触发
 
 jobs:
-  build-and-publish:
+  build:
     runs-on: windows-latest
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download and process Windows 10 x86
-        run: |
-          $urls = $env:WIN10_LTSC_X86_URLS -split ';'
-          foreach ($url in $urls) {
-            $filename = [System.IO.Path]::GetFileName($url)
-            Write-Host "Downloading $filename..."
-            curl -L -O -# $url
+    - name: 检查环境并创建目录
+      shell: pwsh
+      run: |
+        # 检查必要工具
+        $tools = @("7z", "dism")
+        foreach ($tool in $tools) {
+          if (!(Get-Command $tool -ErrorAction SilentlyContinue)) {
+            Write-Error "工具 $tool 未安装"
+            exit 1
           }
+        }
+        
+        # 创建工作目录
+        New-Item -ItemType Directory -Path ".\workdir" -Force
+        Set-Location ".\workdir"
+        Write-Host "当前工作目录: $(Get-Location)"
+        
+        # 创建输出目录
+        New-Item -ItemType Directory -Path ".\output" -Force
+        
+        # 初始化WIM文件（如果不存在）
+        if (!(Test-Path $env:OUTPUT_WIM)) {
+          # 创建一个空的WIM文件
+          New-Item -ItemType File -Path $env:OUTPUT_WIM -Force
+        }
+        
+    - name: 下载并处理Windows10 LTSC 2021 x86
+      shell: pwsh
+      run: |
+        Set-Location ".\workdir"
+        
+        # 下载Windows10 LTSC 2021 x86分卷
+        Write-Host "开始下载Windows10 LTSC 2021 x86..." -ForegroundColor Green
+        
+        # 解析下载URL变量
+        $urls = $env:WIN10_X86_URLS -split "`n" | Where-Object { $_ -match 'https://' }
+        
+        # 下载所有分卷
+        for ($i = 0; $i -lt $urls.Count; $i++) {
+          $fileName = "Windows10_LTSC2021_x86.7z." + ($i+1).ToString("000")
+          Write-Host "下载分卷$($i+1)..." -ForegroundColor Yellow
+          curl.exe -L -o $fileName $urls[$i].Trim() --progress-bar
+        }
+        
+        # 解压7z分卷
+        Write-Host "解压7z分卷..." -ForegroundColor Green
+        7z x "Windows10_LTSC2021_x86.7z.001" -o".\temp_x86"
+        
+        # 定位ISO文件
+        $isoFile = Get-ChildItem -Path ".\temp_x86" -Filter "*.iso" | Select-Object -First 1
+        
+        if ($isoFile) {
+          # 挂载ISO并提取install.esd
+          Write-Host "从ISO中提取install.esd..." -ForegroundColor Green
           
-          $firstFile = $urls[0]
-          $zipName = [System.IO.Path]::GetFileNameWithoutExtension($firstFile)
-          Write-Host "Extracting $zipName.001..."
-          7z x "$zipName.001" -o. -y
+          # 创建挂载点目录
+          New-Item -ItemType Directory -Path ".\mount_x86" -Force
           
-          $isoFile = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
-          if (-not $isoFile) { throw "ISO file not found" }
+          # 使用7z从ISO中提取install.esd
+          7z x $isoFile.FullName "sources\install.esd" -o".\esd_x86" -y
           
-          Write-Host "Extracting install.esd from $isoFile..."
-          7z x $isoFile.FullName -o. "sources\install.esd"
+          # 从install.esd提取第一个映像到WIM文件
+          Write-Host "从install.esd提取第一个映像..." -ForegroundColor Green
+          $esdPath = ".\esd_x86\sources\install.esd"
           
-          Write-Host "Exporting first image to $env:TARGET_WIM..."
-          if (-not (Test-Path $env:TARGET_WIM)) {
-            dism /Export-Image /SourceImageFile:"sources\install.esd" /SourceIndex:1 /DestinationImageFile:$env:TARGET_WIM
+          if (Test-Path $esdPath) {
+            # 获取第一个映像的信息
+            $imageInfo = dism /Get-ImageInfo /ImageFile:$esdPath
+            if ($imageInfo -match "Index : 1") {
+              # 导出第一个映像到WIM文件
+              dism /Export-Image /SourceImageFile:$esdPath /SourceIndex:1 /DestinationImageFile:$env:OUTPUT_WIM /DestinationName:"Windows 10 LTSC 2021 x86" /Compress:max
+              Write-Host "Windows 10 LTSC 2021 x86映像已添加到WIM文件" -ForegroundColor Green
+            } else {
+              # 尝试导出第一个索引
+              dism /Export-Image /SourceImageFile:$esdPath /SourceIndex:1 /DestinationImageFile:$env:OUTPUT_WIM /DestinationName:"Windows 10 LTSC 2021 x86" /Compress:max
+              Write-Host "Windows 10 LTSC 2021 x86映像已添加到WIM文件" -ForegroundColor Green
+            }
           } else {
-            dism /Export-Image /SourceImageFile:"sources\install.esd" /SourceIndex:1 /DestinationImageFile:$env:TARGET_WIM /Append
+            Write-Host "错误: 未找到install.esd文件" -ForegroundColor Red
           }
+        } else {
+          Write-Host "错误: 未找到ISO文件" -ForegroundColor Red
+        }
+        
+        # 清理临时文件
+        Write-Host "清理临时文件..." -ForegroundColor Yellow
+        Get-ChildItem -Path ".\" -Filter "Windows10_LTSC2021_x86.7z.*" | Remove-Item -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path ".\temp_x86", ".\mount_x86", ".\esd_x86" -Recurse -Force -ErrorAction SilentlyContinue
+        
+        # 显示磁盘空间
+        Get-PSDrive C | Select-Object Used,Free | Format-Table
+        
+    - name: 下载并处理Windows10 LTSC 2021 amd64
+      shell: pwsh
+      run: |
+        Set-Location ".\workdir"
+        
+        # 下载Windows10 LTSC 2021 amd64分卷
+        Write-Host "开始下载Windows10 LTSC 2021 amd64..." -ForegroundColor Green
+        
+        # 解析下载URL变量
+        $urls = $env:WIN10_AMD64_URLS -split "`n" | Where-Object { $_ -match 'https://' }
+        
+        # 下载所有分卷
+        for ($i = 0; $i -lt $urls.Count; $i++) {
+          $fileName = "Windows10_LTSC2021_amd64.7z." + ($i+1).ToString("000")
+          Write-Host "下载分卷$($i+1)..." -ForegroundColor Yellow
+          curl.exe -L -o $fileName $urls[$i].Trim() --progress-bar
+        }
+        
+        # 解压7z分卷
+        Write-Host "解压7z分卷..." -ForegroundColor Green
+        7z x "Windows10_LTSC2021_amd64.7z.001" -o".\temp_amd64"
+        
+        # 定位ISO文件
+        $isoFile = Get-ChildItem -Path ".\temp_amd64" -Filter "*.iso" | Select-Object -First 1
+        
+        if ($isoFile) {
+          # 提取install.esd
+          Write-Host "从ISO中提取install.esd..." -ForegroundColor Green
           
-          Write-Host "Cleaning temporary files..."
-          Remove-Item $urls -Force
-          Remove-Item $isoFile.FullName -Force
-          Remove-Item "sources\install.esd" -Force
-
-      - name: Download and process Windows 10 AMD64
-        run: |
-          $urls = $env:WIN10_LTSC_AMD64_URLS -split ';'
-          foreach ($url in $urls) {
-            $filename = [System.IO.Path]::GetFileName($url)
-            Write-Host "Downloading $filename..."
-            curl -L -O -# $url
+          # 创建挂载点目录
+          New-Item -ItemType Directory -Path ".\mount_amd64" -Force
+          
+          # 使用7z从ISO中提取install.esd
+          7z x $isoFile.FullName "sources\install.esd" -o".\esd_amd64" -y
+          
+          # 从install.esd提取第一个映像到WIM文件
+          Write-Host "从install.esd提取第一个映像..." -ForegroundColor Green
+          $esdPath = ".\esd_amd64\sources\install.esd"
+          
+          if (Test-Path $esdPath) {
+            # 导出第一个映像到WIM文件
+            dism /Export-Image /SourceImageFile:$esdPath /SourceIndex:1 /DestinationImageFile:$env:OUTPUT_WIM /DestinationName:"Windows 10 LTSC 2021 amd64" /Compress:max
+            Write-Host "Windows 10 LTSC 2021 amd64映像已添加到WIM文件" -ForegroundColor Green
+          } else {
+            Write-Host "错误: 未找到install.esd文件" -ForegroundColor Red
           }
+        } else {
+          Write-Host "错误: 未找到ISO文件" -ForegroundColor Red
+        }
+        
+        # 清理临时文件
+        Write-Host "清理临时文件..." -ForegroundColor Yellow
+        Get-ChildItem -Path ".\" -Filter "Windows10_LTSC2021_amd64.7z.*" | Remove-Item -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path ".\temp_amd64", ".\mount_amd64", ".\esd_amd64" -Recurse -Force -ErrorAction SilentlyContinue
+        
+        # 显示磁盘空间
+        Get-PSDrive C | Select-Object Used,Free | Format-Table
+        
+    - name: 下载并处理Windows11 LTSC 2024 amd64
+      shell: pwsh
+      run: |
+        Set-Location ".\workdir"
+        
+        # 下载Windows11 LTSC 2024 amd64分卷
+        Write-Host "开始下载Windows11 LTSC 2024 amd64..." -ForegroundColor Green
+        
+        # 解析下载URL变量
+        $urls = $env:WIN11_AMD64_URLS -split "`n" | Where-Object { $_ -match 'https://' }
+        
+        # 下载所有分卷
+        for ($i = 0; $i -lt $urls.Count; $i++) {
+          $fileName = "Windows11_LTSC2024_amd64.7z." + ($i+1).ToString("000")
+          Write-Host "下载分卷$($i+1)..." -ForegroundColor Yellow
+          curl.exe -L -o $fileName $urls[$i].Trim() --progress-bar
+        }
+        
+        # 解压7z分卷
+        Write-Host "解压7z分卷..." -ForegroundColor Green
+        7z x "Windows11_LTSC2024_amd64.7z.001" -o".\temp_win11"
+        
+        # 定位ISO文件
+        $isoFile = Get-ChildItem -Path ".\temp_win11" -Filter "*.iso" | Select-Object -First 1
+        
+        if ($isoFile) {
+          # 提取install.esd
+          Write-Host "从ISO中提取install.esd..." -ForegroundColor Green
           
-          $firstFile = $urls[0]
-          $zipName = [System.IO.Path]::GetFileNameWithoutExtension($firstFile)
-          Write-Host "Extracting $zipName.001..."
-          7z x "$zipName.001" -o. -y
+          # 创建挂载点目录
+          New-Item -ItemType Directory -Path ".\mount_win11" -Force
           
-          $isoFile = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
-          if (-not $isoFile) { throw "ISO file not found" }
+          # 使用7z从ISO中提取install.esd
+          7z x $isoFile.FullName "sources\install.esd" -o".\esd_win11" -y
           
-          Write-Host "Extracting install.esd from $isoFile..."
-          7z x $isoFile.FullName -o. "sources\install.esd"
+          # 从install.esd提取第一个映像到WIM文件
+          Write-Host "从install.esd提取第一个映像..." -ForegroundColor Green
+          $esdPath = ".\esd_win11\sources\install.esd"
           
-          Write-Host "Exporting first image to $env:TARGET_WIM..."
-          dism /Export-Image /SourceImageFile:"sources\install.esd" /SourceIndex:1 /DestinationImageFile:$env:TARGET_WIM /Append
-          
-          Write-Host "Cleaning temporary files..."
-          Remove-Item $urls -Force
-          Remove-Item $isoFile.FullName -Force
-          Remove-Item "sources\install.esd" -Force
-
-      - name: Download and process Windows 11 LTSC
-        run: |
-          $urls = $env:WIN11_LTSC_AMD64_URLS -split ';'
-          foreach ($url in $urls) {
-            $filename = [System.IO.Path]::GetFileName($url)
-            Write-Host "Downloading $filename..."
-            curl -L -O -# $url
+          if (Test-Path $esdPath) {
+            # 导出第一个映像到WIM文件
+            dism /Export-Image /SourceImageFile:$esdPath /SourceIndex:1 /DestinationImageFile:$env:OUTPUT_WIM /DestinationName:"Windows 11 LTSC 2024 amd64" /Compress:max
+            Write-Host "Windows 11 LTSC 2024 amd64映像已添加到WIM文件" -ForegroundColor Green
+          } else {
+            Write-Host "错误: 未找到install.esd文件" -ForegroundColor Red
           }
-          
-          $firstFile = $urls[0]
-          $zipName = [System.IO.Path]::GetFileNameWithoutExtension($firstFile)
-          Write-Host "Extracting $zipName.001..."
-          7z x "$zipName.001" -o. -y
-          
-          $isoFile = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
-          if (-not $isoFile) { throw "ISO file not found" }
-          
-          Write-Host "Extracting install.esd from $isoFile..."
-          7z x $isoFile.FullName -o. "sources\install.esd"
-          
-          Write-Host "Exporting first image to $env:TARGET_WIM..."
-          dism /Export-Image /SourceImageFile:"sources\install.esd" /SourceIndex:1 /DestinationImageFile:$env:TARGET_WIM /Append
-          
-          Write-Host "Cleaning temporary files..."
-          Remove-Item $urls -Force
-          Remove-Item $isoFile.FullName -Force
-          Remove-Item "sources\install.esd" -Force
-
-      - name: Convert WIM to ESD
-        run: |
-          Write-Host "Converting $env:TARGET_WIM to $env:TARGET_ESD..."
-          dism /Export-Image /SourceImageFile:$env:TARGET_WIM /SourceIndex:1 /DestinationImageFile:$env:TARGET_ESD
-          Remove-Item $env:TARGET_WIM -Force
-
-      - name: Split ESD into 1950MB chunks
-        run: |
-          Write-Host "Splitting $env:TARGET_ESD into 1950MB chunks..."
-          7z a -v1950m "$env:RELEASE_NAME.7z" $env:TARGET_ESD
-          Remove-Item $env:TARGET_ESD -Force
-
-      - name: Upload release assets
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_name: ${{ env.RELEASE_NAME }}.7z.001
-          asset_path: ${{ env.RELEASE_NAME }}.7z.001
-
-      - name: Upload release assets (continuation)
-        if: ${{ github.event_name == 'release' }}
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_name: ${{ env.RELEASE_NAME }}.7z.002
-          asset_path: ${{ env.RELEASE_NAME }}.7z.002
-
-      - name: Upload release assets (final)
-        if: ${{ github.event_name == 'release' }}
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_name: ${{ env.RELEASE_NAME }}.7z.003
-          asset_path: ${{ env.RELEASE_NAME }}.7z.003
+        } else {
+          Write-Host "错误: 未找到ISO文件" -ForegroundColor Red
+        }
+        
+        # 清理临时文件
+        Write-Host "清理临时文件..." -ForegroundColor Yellow
+        Get-ChildItem -Path ".\" -Filter "Windows11_LTSC2024_amd64.7z.*" | Remove-Item -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path ".\temp_win11", ".\mount_win11", ".\esd_win11" -Recurse -Force -ErrorAction SilentlyContinue
+        
+        # 显示最终磁盘空间
+        Get-PSDrive C | Select-Object Used,Free | Format-Table
+        
+    - name: 转换WIM为ESD并分卷压缩
+      shell: pwsh
+      run: |
+        Set-Location ".\workdir"
+        
+        # 检查WIM文件是否存在
+        if (!(Test-Path $env:OUTPUT_WIM)) {
+          Write-Host "错误: WIM文件不存在" -ForegroundColor Red
+          exit 1
+        }
+        
+        # 获取WIM文件中的映像信息
+        Write-Host "WIM文件中的映像信息:" -ForegroundColor Green
+        dism /Get-ImageInfo /ImageFile:$env:OUTPUT_WIM
+        
+        # 转换WIM为ESD
+        Write-Host "正在转换WIM为ESD..." -ForegroundColor Green
+        dism /Export-Image /SourceImageFile:$env:OUTPUT_WIM /SourceIndex:1 /DestinationImageFile:$env:OUTPUT_ESD /Compress:recovery
+        
+        # 检查ESD文件
+        if (Test-Path $env:OUTPUT_ESD) {
+          $esdSize = (Get-Item $env:OUTPUT_ESD).Length
+          Write-Host "ESD文件创建成功，大小: $([math]::Round($esdSize/1GB, 2)) GB" -ForegroundColor Green
+        else {
+          Write-Host "错误: ESD文件创建失败" -ForegroundColor Red
+          exit 1
+        }
+        
+        # 分卷压缩ESD文件（每个分卷1950M）
+        Write-Host "开始分卷压缩ESD文件..." -ForegroundColor Green
+        7z a -v1950M ".\output\$env:RELEASE_NAME.zip" $env:OUTPUT_ESD
+        
+        # 清理工作目录中的原始文件
+        Remove-Item -Path $env:OUTPUT_WIM, $env:OUTPUT_ESD -Force -ErrorAction SilentlyContinue
+        
+        # 显示输出目录内容
+        Write-Host "输出目录内容:" -ForegroundColor Green
+        Get-ChildItem -Path ".\output" -Recurse | Format-Table Name, Length, LastWriteTime
+        
+    - name: 创建Release并上传文件
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        tag_name: ${{ env.RELEASE_TAG }}
+        name: ${{ env.RELEASE_NAME }}
+        body: |
+          自动构建的Windows LTSC ESD文件
+          包含:
+          - Windows 10 LTSC 2021 x86
+          - Windows 10 LTSC 2021 amd64
+          - Windows 11 LTSC 2024 amd64
+        draft: false
+        prerelease: false
+        files: |
+          workdir/output/${{ env.RELEASE_NAME }}.zip.*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: 上传文件到Release（无tag触发时）
+      if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/')
+      shell: pwsh
+      run: |
+        Set-Location ".\workdir"
+        
+        Write-Host "工作流手动触发，跳过自动发布到Releases" -ForegroundColor Yellow
+        Write-Host "输出文件位置:" -ForegroundColor Green
+        Get-ChildItem -Path ".\output" -Recurse | Format-Table FullName, Length, LastWriteTime
+        
+        Write-Host "如果需要发布到Releases，请创建tag: $env:RELEASE_TAG" -ForegroundColor Cyan
+        
+    - name: 最终清理
+      shell: pwsh
+      run: |
+        # 清理整个工作目录
+        if (Test-Path ".\workdir") {
+          Remove-Item -Path ".\workdir" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host "所有临时文件已清理" -ForegroundColor Green
