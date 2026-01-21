@@ -3,20 +3,16 @@ name: Windows_LTSC_ESD
 on:
   workflow_dispatch:
 
-# 全局环境变量（纯ASCII，避免编码问题）
 env:
-  # 强制GitHub Actions Runner全局UTF8
   PYTHONIOENCODING: utf-8
   LC_ALL: C.UTF-8
   LANG: C.UTF-8
-  # 下载URL（单行、半角逗号）
   DOWNLOAD_URLS_1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001,https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
   DOWNLOAD_URLS_2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001,https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002,https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
   DOWNLOAD_URLS_3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001,https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002,https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
-  # 目标文件
   TARGET_WIM: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim
   TARGET_ESD: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd
-  SPLIT_SIZE: 1950M
+  SPLIT_SIZE: 1950M  # 7-Zip支持的格式：数字+M/G，无空格
 
 jobs:
   build-esd:
@@ -26,42 +22,28 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 第一步：全局强制UTF8编码（Windows Runner）
       - name: Force Global UTF8 Encoding
         shell: powershell
         run: |
-          # 1. 控制台编码
           [Console]::OutputEncoding = [System.Text.UTF8Encoding]::UTF8
           [Console]::InputEncoding = [System.Text.UTF8Encoding]::UTF8
-          # 2. PowerShell默认编码
           $PSDefaultParameterValues['*:Encoding'] = 'utf8'
-          # 3. Windows系统区域设置（UTF8）
-          Set-WinSystemLocale -SystemLocale en-US -ErrorAction SilentlyContinue
-          Set-Culture en-US -ErrorAction SilentlyContinue
-          # 4. 验证编码
-          Write-Host "Console Output Encoding: $([Console]::OutputEncoding.EncodingName)"
-          Write-Host "PowerShell Default Encoding: $($PSDefaultParameterValues['*:Encoding'])"
+          Write-Host "Console Encoding: $([Console]::OutputEncoding.EncodingName)"
 
-      # 安装7-Zip（纯ASCII输出，无中文）
       - name: Install 7-Zip
         shell: powershell
         run: |
           $7zPath = "C:\Program Files\7-Zip\7z.exe"
           if (-not (Test-Path $7zPath)) {
               choco install 7zip -y --no-progress --ignore-checksums --force
-              if (-not (Test-Path $7zPath)) {
-                  throw "7-Zip installation failed"
-              }
+              if (-not (Test-Path $7zPath)) { throw "7-Zip installation failed" }
           }
           $env:PATH += ";C:\Program Files\7-Zip"
-          # 纯ASCII输出，避免编码解析错误
           Write-Host "7-Zip path: $7zPath"
 
-      # 核心处理逻辑（纯ASCII输出，无中文符号）
-      - name: Process All Files (UTF8 + No Syntax Error)
+      - name: Process All Files (Fix DISM + 7-Zip)
         shell: powershell
         run: |
-          # 强制UTF8编码
           [Console]::OutputEncoding = [System.Text.UTF8Encoding]::UTF8
 
           function Process-7z-ISO {
@@ -70,79 +52,79 @@ jobs:
                   [string]$TargetWim
               )
 
-              # Split URLs
               $urls = $UrlCsv -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
               if ($urls.Count -eq 0) { throw "URL list is empty" }
               Write-Host "`n=== Processing: $($urls.Count) volumes ==="
 
-              # Create temp dirs
               $tempDir = New-Item -Path "$env:GITHUB_WORKSPACE\temp_$(Get-Random)" -ItemType Directory -Force
               $dlDir = New-Item -Path "$tempDir\downloads" -ItemType Directory -Force
               $extractDir = New-Item -Path "$tempDir\extract" -ItemType Directory -Force
 
               try {
-                  # Download all volumes
+                  # Download volumes
                   foreach ($url in $urls) {
                       $fileName = [System.IO.Path]::GetFileName($url)
                       $savePath = "$dlDir\$fileName"
-                      
                       Write-Host "Downloading: $fileName"
                       curl.exe --progress-bar -L -f -o "$savePath" "$url"
-                      
                       if (-not (Test-Path $savePath) -or (Get-Item $savePath).Length -lt 1024) {
-                          throw "Download failed: $fileName (empty or missing)"
+                          throw "Download failed: $fileName"
                       }
-                      $fileSize = [math]::Round((Get-Item $savePath).Length/1GB,2)
-                      Write-Host "Downloaded: $fileName ($fileSize GB)"
+                      Write-Host "Downloaded: $fileName ($([math]::Round((Get-Item $savePath).Length/1GB,2)) GB)"
                   }
 
-                  # Extract 7z volumes
+                  # Extract 7z
                   $7z001 = Get-ChildItem -Path $dlDir -Filter "*.7z.001" | Select-Object -First 1
-                  if (-not $7z001) { throw "7z.001 volume not found" }
-                  
+                  if (-not $7z001) { throw "7z.001 not found" }
                   Write-Host "`nExtracting: $($7z001.Name)"
                   & "C:\Program Files\7-Zip\7z.exe" x -y -bb1 -o"$extractDir" "$($7z001.FullName)"
-                  if ($LASTEXITCODE -ne 0) { throw "7z extract failed, exit code: $LASTEXITCODE" }
+                  if ($LASTEXITCODE -ne 0) { throw "7z extract failed (code: $LASTEXITCODE)" }
 
-                  # Find ISO file (recursive)
-                  Write-Host "`nFinding ISO file..."
+                  # Find ISO
                   $isoFiles = Get-ChildItem -Path $extractDir -Filter "*.iso" -Recurse
                   if ($isoFiles.Count -eq 0) {
-                      Write-Host "All files in extract dir:"
                       Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { Write-Host " - $($_.FullName)" }
-                      throw "ISO file not found after extraction"
+                      throw "ISO not found"
                   }
                   $isoFile = $isoFiles | Select-Object -First 1
                   Write-Host "Found ISO: $($isoFile.FullName)"
 
-                  # Extract install.esd from ISO
+                  # Extract install.esd
                   $isoExtractDir = New-Item -Path "$tempDir\iso_extract" -ItemType Directory -Force
                   Write-Host "`nExtracting install.esd..."
                   & "C:\Program Files\7-Zip\7z.exe" x -y -o"$isoExtractDir" "$($isoFile.FullName)" "sources\install.esd"
                   $esdFile = "$isoExtractDir\sources\install.esd"
-                  
-                  if (-not (Test-Path $esdFile)) {
-                      throw "install.esd not found in ISO (sources/install.esd)"
-                  }
+                  if (-not (Test-Path $esdFile)) { throw "install.esd not found" }
                   Write-Host "Found install.esd: $esdFile"
 
-                  # Export image to WIM
+                  # ========== 修复DISM命令：移除多余的/destinationindex ==========
                   Write-Host "`nExporting image to WIM..."
                   if (-not (Test-Path $TargetWim)) {
-                      dism /Export-Image /SourceImageFile:"$esdFile" /SourceIndex:1 `
-                          /DestinationImageFile:"$TargetWim" /Compress:max /CheckIntegrity
+                      # 首次创建WIM：无多余参数
+                      dism /Export-Image `
+                          /SourceImageFile:"$esdFile" `
+                          /SourceIndex:1 `
+                          /DestinationImageFile:"$TargetWim" `
+                          /Compress:max `
+                          /CheckIntegrity
+                      if ($LASTEXITCODE -ne 0) { throw "DISM export failed (code: $LASTEXITCODE)" }
                   } else {
-                      $imgCount = (dism /Get-WimInfo /WimFile:"$TargetWim" | Select-String "Image Index" | Measure-Object).Count + 1
-                      dism /Export-Image /SourceImageFile:"$esdFile" /SourceIndex:1 `
-                          /DestinationImageFile:"$TargetWim" /DestinationIndex:$imgCount /Compress:max /CheckIntegrity
+                      # 追加映像：移除/destinationindex（DISM自动分配索引）
+                      dism /Export-Image `
+                          /SourceImageFile:"$esdFile" `
+                          /SourceIndex:1 `
+                          /DestinationImageFile:"$TargetWim" `
+                          /Compress:max `
+                          /CheckIntegrity
+                      if ($LASTEXITCODE -ne 0) { throw "DISM append failed (code: $LASTEXITCODE)" }
                   }
 
-                  if (-not (Test-Path $TargetWim)) { throw "WIM export failed" }
+                  # 验证WIM真的创建成功
+                  if (-not (Test-Path $TargetWim) -or (Get-Item $TargetWim).Length -lt 1024) {
+                      throw "WIM file is empty or missing"
+                  }
                   Write-Host "WIM export success: $TargetWim"
 
-              } catch {
-                  Write-Host "`n❌ Processing failed: $_"
-                  throw $_
               } finally {
                   Write-Host "`nCleaning temp dir: $tempDir"
                   Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -158,32 +140,49 @@ jobs:
           # Convert WIM to ESD
           Write-Host "`n=== Converting WIM to ESD ==="
           $esdFile = "$env:GITHUB_WORKSPACE\$env:TARGET_ESD"
-          $imgTotal = (dism /Get-WimInfo /WimFile:$finalWim | Select-String "Image Index" | Measure-Object).Count
+          # 先获取WIM中的映像数量（正确处理DISM输出）
+          $dismOutput = dism /Get-WimInfo /WimFile:$finalWim 2>&1
+          $imgTotal = ($dismOutput | Select-String "Image Index" | Measure-Object).Count
+          if ($imgTotal -eq 0) { throw "No images found in WIM" }
           
+          # 转换WIM到ESD（Recovery压缩）
           for ($i=1; $i -le $imgTotal; $i++) {
-              Write-Host "Exporting image $i to ESD..."
+              Write-Host "Exporting image $i/$imgTotal to ESD..."
               if ($i -eq 1) {
-                  dism /Export-Image /SourceImageFile:$finalWim /SourceIndex:$i `
-                      /DestinationImageFile:$esdFile /Compress:recovery /CheckIntegrity
+                  dism /Export-Image `
+                      /SourceImageFile:$finalWim `
+                      /SourceIndex:$i `
+                      /DestinationImageFile:$esdFile `
+                      /Compress:recovery `
+                      /CheckIntegrity
               } else {
-                  dism /Export-Image /SourceImageFile:$finalWim /SourceIndex:$i `
-                      /DestinationImageFile:$esdFile /DestinationIndex:$i /Compress:recovery /CheckIntegrity
+                  dism /Export-Image `
+                      /SourceImageFile:$finalWim `
+                      /SourceIndex:$i `
+                      /DestinationImageFile:$esdFile `
+                      /Compress:recovery `
+                      /CheckIntegrity
               }
+              if ($LASTEXITCODE -ne 0) { throw "ESD export failed (image $i, code: $LASTEXITCODE)" }
           }
+          # 验证ESD
+          if (-not (Test-Path $esdFile)) { throw "ESD file not created" }
           Remove-Item -Path $finalWim -Force
 
-          # Split ESD
-          Write-Host "`n=== Splitting ESD (1950M) ==="
-          & "C:\Program Files\7-Zip\7z.exe" a -y -v$env:SPLIT_SIZE "$esdFile.7z" "$esdFile"
-          if ($LASTEXITCODE -ne 0) { throw "7z split failed" }
-          Remove-Item -Path $esdFile -Force
+          # ========== 修复7-Zip参数：本地变量展开，避免环境变量解析失败 ==========
+          Write-Host "`n=== Splitting ESD ($env:SPLIT_SIZE) ==="
+          # 先将环境变量赋值给本地变量，确保7-Zip识别
+          $splitSize = $env:SPLIT_SIZE
+          $7zPath = "C:\Program Files\7-Zip\7z.exe"
+          # 分卷压缩：使用本地变量，参数格式正确
+          & $7zPath a -y -mx=9 -v$splitSize "$esdFile.7z" "$esdFile"
+          if ($LASTEXITCODE -ne 0) { throw "7z split failed (code: $LASTEXITCODE)" }
 
-          # Verify split files
+          # 验证分卷文件
           $splitFiles = Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Filter "$($env:TARGET_ESD).7z.*"
-          if ($splitFiles.Count -eq 0) { throw "Split files not found" }
-          Write-Host "Split success: $($splitFiles.Count) volumes"
+          if ($splitFiles.Count -eq 0) { throw "No split files created" }
+          Write-Host "Split success: $($splitFiles.Count) volumes created"
 
-      # Publish to Releases
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
@@ -195,7 +194,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Final Cleanup
       - name: Final Cleanup
         if: always()
         shell: powershell
