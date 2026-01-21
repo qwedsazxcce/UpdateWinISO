@@ -1,6 +1,5 @@
 name: Windows_LTSC_ESD
 
-# 触发条件：手动触发
 on:
   workflow_dispatch:
 
@@ -13,7 +12,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 安装7-Zip（英文日志）
       - name: Install 7-Zip
         run: |
           if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) {
@@ -24,7 +22,6 @@ jobs:
           }
         shell: powershell
 
-      # 安装GitHub CLI
       - name: Install GitHub CLI (gh)
         run: |
           if (-not (Get-Command "gh" -ErrorAction SilentlyContinue)) {
@@ -35,7 +32,6 @@ jobs:
           }
         shell: powershell
 
-      # 创建临时目录
       - name: Create temporary directory
         run: |
           $tempDir = "$env:GITHUB_WORKSPACE\Temp_Win_Image"
@@ -47,7 +43,6 @@ jobs:
           }
         shell: powershell
 
-      # 核心修改：用curl下载（带进度+重试）
       - name: Download ISO split archives (curl)
         run: |
           # 定义下载分组
@@ -80,11 +75,13 @@ jobs:
           # 遍历下载分组
           foreach ($group in $downloadGroups) {
               $groupName = $group.Name
+              $tempDir = "$env:GITHUB_WORKSPACE\Temp_Win_Image" # 明确临时目录路径
               Write-Host "`n=== Processing group: $groupName ==="
               
+              # 下载所有分卷
               foreach ($url in $group.Urls) {
                   $fileName = $url.Split('/')[-1]
-                  $savePath = "$env:GITHUB_WORKSPACE\Temp_Win_Image\$fileName"
+                  $savePath = Join-Path -Path $tempDir -ChildPath $fileName # 用Join-Path避免路径拼接错误
                   
                   # 检查文件是否已存在
                   if (Test-Path $savePath) {
@@ -92,7 +89,7 @@ jobs:
                     continue
                   }
 
-                  # curl下载逻辑（带进度+重试）
+                  # curl下载逻辑
                   $retryCount = 0
                   $maxRetries = 3
                   $downloadSuccess = $false
@@ -100,14 +97,6 @@ jobs:
                   while ($retryCount -lt $maxRetries -and -not $downloadSuccess) {
                       Write-Host "`nDownload attempt ${retryCount + 1}/${maxRetries}: $fileName"
                       
-                      # Windows下curl.exe参数说明：
-                      # -L：跟随重定向（GitHub Release链接可能重定向）
-                      # -o：指定输出文件路径
-                      # --progress-bar：显示可视化进度条（替代默认的进度百分比）
-                      # --retry：重试次数（兜底，外层已做重试，这里双重保障）
-                      # --retry-delay：重试延迟5秒
-                      # --connect-timeout：连接超时30秒
-                      # --max-time：整体下载超时600秒（10分钟）
                       curl.exe -L -o "$savePath" `
                           --progress-bar `
                           --retry 2 `
@@ -116,63 +105,86 @@ jobs:
                           --max-time 600 `
                           $url
                       
-                      # 检查curl退出码（0=成功）
                       if ($LASTEXITCODE -eq 0) {
                           $downloadSuccess = $true
                           Write-Host "`nDownload success: $fileName"
+                          # 验证文件是否真的存在
+                          if (-not (Test-Path $savePath)) {
+                              Write-Warning "File download reported success but not found: $savePath"
+                              $downloadSuccess = $false
+                              $retryCount++
+                              Start-Sleep -Seconds 5
+                          }
                       } else {
                           $retryCount++
                           Write-Warning "Download failed (curl exit code: $LASTEXITCODE), attempt ${retryCount}/${maxRetries}, retrying in 5 seconds..."
-                          # 清理不完整文件
                           if (Test-Path $savePath) { Remove-Item $savePath -Force }
                           Start-Sleep -Seconds 5
                       }
                   }
 
-                  # 下载失败终止
                   if (-not $downloadSuccess) {
                       Write-Error "Download failed after ${maxRetries} retries: $fileName"
                       exit 1
                   }
               }
 
-              # ========== 原有解压/提取/导出逻辑（无修改） ==========
+              # ========== 修复：解压逻辑（核心修改） ==========
               Write-Host "Extracting split archives: $groupName"
-              $7zFirstFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.001" | Where-Object { $_.Name -match $groupName } | Select-Object -First 1
+              # 1. 输出临时目录下的所有文件，便于调试
+              Write-Host "Files in temp directory ($tempDir):"
+              Get-ChildItem -Path $tempDir -Name | ForEach-Object { Write-Host " - $_" }
+              
+              # 2. 明确查找路径+用Contains替代match（更稳定的字符串包含匹配）
+              $7zFirstFile = Get-ChildItem -Path $tempDir -Filter "*.7z.001" | 
+                              Where-Object { $_.Name.Contains($groupName) } | 
+                              Select-Object -First 1
+              
+              # 3. 更详细的错误提示
               if (-not $7zFirstFile) {
-                  Write-Error "No 7z start file found for $groupName (.7z.001)"
+                  Write-Error "`nERROR: No .7z.001 file found for $groupName in $tempDir`nCheck if the file was downloaded correctly (see file list above)."
                   exit 1
               }
 
-              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$env:GITHUB_WORKSPACE\Temp_Win_Image" $7zFirstFile.FullName | Out-Null
+              Write-Host "Found 7z start file: $($7zFirstFile.FullName)"
+              # 执行解压（明确7z路径）
+              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$tempDir" $7zFirstFile.FullName | Out-Null
+              
               if ($LASTEXITCODE -ne 0) {
                   Write-Error "Extract failed for $groupName (7-Zip exit code: $LASTEXITCODE)"
                   exit 1
               }
               Write-Host "Extract success: $groupName"
 
+              # ========== 提取install.esd（同步修复路径） ==========
               Write-Host "Extracting install.esd from ISO: $groupName"
-              $isoFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.iso" | Where-Object { $_.Name -match $groupName } | Select-Object -First 1
+              $isoFile = Get-ChildItem -Path $tempDir -Filter "*.iso" | 
+                          Where-Object { $_.Name.Contains($groupName) } | 
+                          Select-Object -First 1
+              
               if (-not $isoFile) {
-                  Write-Error "No ISO file found for $groupName"
+                  Write-Error "No ISO file found for $groupName in $tempDir"
                   exit 1
               }
 
-              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$env:GITHUB_WORKSPACE\Temp_Win_Image" $isoFile.FullName "sources/install.esd" | Out-Null
+              Write-Host "Found ISO file: $($isoFile.FullName)"
+              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$tempDir" $isoFile.FullName "sources/install.esd" | Out-Null
+              
               if ($LASTEXITCODE -ne 0) {
-                  Write-Error "install.esd not found in ISO for $groupName"
+                  Write-Error "install.esd not found in ISO for $groupName (7-Zip exit code: $LASTEXITCODE)"
                   exit 1
               }
 
-              $esdFile = "$env:GITHUB_WORKSPACE\Temp_Win_Image\sources\install.esd"
+              $esdFile = Join-Path -Path $tempDir -ChildPath "sources/install.esd"
               if (-not (Test-Path $esdFile)) {
                   Write-Error "install.esd extraction failed: $esdFile not exists"
                   exit 1
               }
               Write-Host "install.esd extract success: $esdFile"
 
+              # ========== 导出映像（同步修复路径） ==========
               Write-Host "Exporting image 1 to WIM: $groupName"
-              $targetWim = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
+              $targetWim = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
               $dismArgs = @(
                   "/export-image",
                   "/sourceimagefile:$esdFile",
@@ -195,19 +207,20 @@ jobs:
               }
               Write-Host "Image export success: $groupName"
 
+              # ========== 清理临时文件 ==========
               Write-Host "Cleaning temporary files for $groupName"
-              Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.*" -Force -ErrorAction SilentlyContinue
-              Remove-Item $isoFile.FullName -Force -ErrorAction SilentlyContinue
-              Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image\sources" -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item -Path $tempDir -Filter "*.7z.*" -Force -ErrorAction SilentlyContinue
+              Remove-Item -Path $isoFile.FullName -Force -ErrorAction SilentlyContinue
+              Remove-Item -Path (Join-Path $tempDir "sources") -Recurse -Force -ErrorAction SilentlyContinue
               Write-Host "Temporary files cleaned for $groupName"
           }
         shell: powershell
 
-      # 转换WIM为ESD（无修改）
+      # 转换WIM为ESD（无修改，仅同步路径写法）
       - name: Convert WIM to ESD (recovery compression)
         run: |
-          $targetWim = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
-          $targetEsd = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
+          $targetWim = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
+          $targetEsd = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
           
           if (-not (Test-Path $targetWim)) {
               Write-Error "Target WIM file not exists: $targetWim"
@@ -230,11 +243,11 @@ jobs:
           Write-Host "WIM to ESD convert success: $targetEsd"
         shell: powershell
 
-      # 分卷压缩ESD（无修改）
+      # 分卷压缩ESD（同步路径写法）
       - name: Split ESD into 1950MB volumes (7z)
         run: |
-          $targetEsd = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
-          $splitPrefix = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.7z"
+          $targetEsd = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
+          $splitPrefix = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.7z"
           
           if (-not (Test-Path $targetEsd)) {
               Write-Error "Target ESD file not exists: $targetEsd"
@@ -255,22 +268,22 @@ jobs:
               exit 1
           }
 
-          $splitFiles = Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.001"
+          $splitFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "*.7z.001"
           if (-not $splitFiles) {
               Write-Error "No split files generated"
               exit 1
           }
           Write-Host "ESD split success, generated files:"
-          Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.*" | ForEach-Object { Write-Host " - $($_.Name)" }
+          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "*.7z.*" | ForEach-Object { Write-Host " - $($_.Name)" }
         shell: powershell
 
-      # 发布到Releases（无修改）
+      # 发布到Releases（同步路径写法）
       - name: Publish split files to GitHub Releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $releaseName = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025"
-          $splitFiles = Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.*" | Sort-Object Name
+          $splitFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "*.7z.*" | Sort-Object Name
           
           if (-not $splitFiles) {
               Write-Error "No split files to publish"
@@ -310,13 +323,14 @@ jobs:
           }
         shell: powershell
 
-      # 清理临时文件（无修改）
+      # 清理临时文件
       - name: Cleanup all temporary files
         if: always()
         run: |
+          $tempDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Temp_Win_Image"
           Write-Host "Cleaning all temporary files..."
-          Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item "$env:GITHUB_WORKSPACE\*.wim" -Force -ErrorAction SilentlyContinue
-          Remove-Item "$env:GITHUB_WORKSPACE\*.esd" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path (Join-Path $env:GITHUB_WORKSPACE "*.wim") -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path (Join-Path $env:GITHUB_WORKSPACE "*.esd") -Force -ErrorAction SilentlyContinue
           Write-Host "Temporary files cleanup completed"
         shell: powershell
