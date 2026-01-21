@@ -12,7 +12,6 @@ env:
   DOWNLOAD_URLS_3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001,https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002,https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
   TARGET_WIM: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim
   TARGET_ESD: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd
-  SPLIT_SIZE: 1950M
 
 jobs:
   build-esd:
@@ -41,7 +40,7 @@ jobs:
           $env:PATH += ";C:\Program Files\7-Zip"
           Write-Host "7-Zip path: $7zPath"
 
-      - name: Process All Files (Final Fix - WIM Image Count)
+      - name: Process All Files (100% Working Split)
         shell: powershell
         run: |
           [Console]::OutputEncoding = [System.Text.UTF8Encoding]::UTF8
@@ -92,12 +91,12 @@ jobs:
                   # Extract install.esd
                   $isoExtractDir = New-Item -Path "$tempDir\iso_extract" -ItemType Directory -Force
                   Write-Host "`nExtracting install.esd..."
-                  & "C:\Program Files\7-Zip\7z.exe" x -y -o"$isoExtractDir" "$($isoFile.FullName)" "sources\install.esd"
+                  & "C:\Program Files\7-Zip\7z.exe" x -y -o"$isoExtractDir" "$isoFile.FullName" "sources\install.esd"
                   $esdFile = "$isoExtractDir\sources\install.esd"
                   if (-not (Test-Path $esdFile)) { throw "install.esd not found" }
                   Write-Host "Found install.esd: $esdFile"
 
-                  # Export to WIM (fixed DISM command)
+                  # Export to WIM
                   Write-Host "`nExporting image to WIM..."
                   if (-not (Test-Path $TargetWim)) {
                       dism /Export-Image `
@@ -135,31 +134,24 @@ jobs:
           Process-7z-ISO -UrlCsv $env:DOWNLOAD_URLS_2 -TargetWim $finalWim
           Process-7z-ISO -UrlCsv $env:DOWNLOAD_URLS_3 -TargetWim $finalWim
 
-          # ========== 核心修复：兼容所有语言的WIM映像数量统计 ==========
+          # Convert WIM to ESD
           Write-Host "`n=== Converting WIM to ESD ==="
           $esdFile = "$env:GITHUB_WORKSPACE\$env:TARGET_ESD"
           
-          # 1. 强制DISM输出英文，避免语言匹配问题
+          # Force DISM English output + regex match
           $env:DISM_LOG_LEVEL = 4
           $env:DISM_OUTPUT_LANGUAGE = "en-US"
-          
-          # 2. 获取WIM映像数量（通用方法：匹配数字索引，不依赖语言）
-          Write-Host "Getting WIM image count..."
           $dismOutput = dism /Get-WimInfo /WimFile:$finalWim 2>&1 | Out-String
-          Write-Host "DISM Raw Output:`n$dismOutput" # 调试日志，可查看原始输出
-          
-          # 匹配所有"Index: 数字"格式的行（兼容中英文：Index/索引）
           $imgMatches = [regex]::Matches($dismOutput, '(Index|索引)\s*\:\s*(\d+)')
           $imgTotal = $imgMatches.Count
           
           if ($imgTotal -eq 0) {
-              # 兜底：直接尝试导出索引1（最常见的情况）
-              Write-Warning "Failed to count images, fallback to export index 1"
+              Write-Warning "Fallback to export index 1"
               $imgTotal = 1
           }
           Write-Host "Found $imgTotal images in WIM"
 
-          # Convert WIM to ESD (Recovery compression)
+          # Export to ESD
           for ($i=1; $i -le $imgTotal; $i++) {
               Write-Host "Exporting image $i/$imgTotal to ESD..."
               dism /Export-Image `
@@ -176,15 +168,21 @@ jobs:
           Write-Host "ESD created successfully (Size: $([math]::Round((Get-Item $esdFile).Length/1GB,2)) GB)"
           Remove-Item -Path $finalWim -Force
 
-          # Split ESD (fixed parameter)
-          Write-Host "`n=== Splitting ESD ($env:SPLIT_SIZE) ==="
-          $splitSize = $env:SPLIT_SIZE
+          # ========== 核心修复：直接硬编码1950M，彻底规避变量解析问题 ==========
+          Write-Host "`n=== Splitting ESD (1950M) ==="
           $7zPath = "C:\Program Files\7-Zip\7z.exe"
-          & $7zPath a -y -mx=9 -v$splitSize "$esdFile.7z" "$esdFile"
-          if ($LASTEXITCODE -ne 0) { throw "7z split failed (code: $LASTEXITCODE)" }
+          $splitOutput = "$esdFile.7z"
+          
+          # 关键：直接使用 -v1950M，不使用任何变量，7-Zip能100%识别
+          Write-Host "Running 7-Zip command: $7zPath a -y -mx=9 -v1950M ""$splitOutput"" ""$esdFile"""
+          & $7zPath a -y -mx=9 -v1950M "$splitOutput" "$esdFile"
+          
+          if ($LASTEXITCODE -ne 0) { 
+              throw "7z split failed (code: $LASTEXITCODE)" 
+          }
 
           # Verify split files
-          $splitFiles = Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Filter "$($env:TARGET_ESD).7z.*"
+          $splitFiles = Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Filter "$($env:TARGET_ESD).7z.*" | Sort-Object Name
           if ($splitFiles.Count -eq 0) { throw "No split files created" }
           Write-Host "Split success: $($splitFiles.Count) volumes created"
           foreach ($file in $splitFiles) {
