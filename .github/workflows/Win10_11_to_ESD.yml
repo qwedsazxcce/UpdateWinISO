@@ -48,10 +48,80 @@ jobs:
           }
         shell: powershell
 
-      # 下载分卷（核心修复：&转义+英文日志+大括号匹配）
+      # 下载分卷（核心新增：带进度条的下载函数）
       - name: Download ISO split archives
         run: |
-          # 定义下载分组（纯英文，避免编码问题）
+          # ========== 新增：带进度条的下载函数 ==========
+          function Download-FileWithProgress {
+              [CmdletBinding()]
+              param (
+                  [Parameter(Mandatory=$true)]
+                  [string]$Url,
+                  [Parameter(Mandatory=$true)]
+                  [string]$OutputPath,
+                  [int]$TimeoutSec = 300
+              )
+
+              try {
+                  # 创建WebClient对象，绑定进度事件
+                  $webClient = New-Object System.Net.WebClient
+                  $downloadComplete = $false
+                  
+                  # 注册进度事件（每秒更新一次）
+                  $eventHandler = Register-ObjectEvent -InputObject $webClient -EventName DownloadProgressChanged -Action {
+                      # 计算进度百分比和大小
+                      $percent = $EventArgs.ProgressPercentage
+                      $bytesReceived = [math]::Round($EventArgs.BytesReceived / 1MB, 2)
+                      $totalBytes = [math]::Round($EventArgs.TotalBytesToReceive / 1MB, 2)
+                      
+                      # 生成文本进度条（20个字符长度）
+                      $progressBarLength = 20
+                      $completedLength = [math]::Floor($percent / 100 * $progressBarLength)
+                      $remainingLength = $progressBarLength - $completedLength
+                      $progressBar = "[" + ("#" * $completedLength) + ("-" * $remainingLength) + "]"
+                      
+                      # 输出进度（覆盖当前行，更整洁）
+                      Write-Host "`rDownload progress: $progressBar $percent% | $bytesReceived MB / $totalBytes MB" -NoNewline
+                  }
+
+                  # 开始下载
+                  Write-Host "`nStarting download: $($Url.Split('/')[-1])"
+                  $webClient.DownloadFileAsync($Url, $OutputPath)
+                  
+                  # 等待下载完成或超时
+                  $timer = [System.Diagnostics.Stopwatch]::StartNew()
+                  while (-not $downloadComplete -and $timer.Elapsed.TotalSeconds -lt $TimeoutSec) {
+                      if ($webClient.IsBusy) {
+                          Start-Sleep -Milliseconds 500
+                      } else {
+                          $downloadComplete = $true
+                      }
+                  }
+                  $timer.Stop()
+
+                  # 清理事件和对象
+                  Unregister-Event -SubscriptionId $eventHandler.Id -Force
+                  $webClient.Dispose()
+
+                  # 检查超时
+                  if (-not $downloadComplete) {
+                      throw "Download timed out after $TimeoutSec seconds"
+                  }
+
+                  # 下载完成后输出换行
+                  Write-Host "`nDownload completed: $($Url.Split('/')[-1])"
+                  return $true
+              } catch {
+                  Write-Warning "Download failed: $($_.Exception.Message)"
+                  # 清理残留文件
+                  if (Test-Path $OutputPath) {
+                      Remove-Item $OutputPath -Force
+                  }
+                  return $false
+              }
+          }
+
+          # ========== 原有下载分组配置 ==========
           $downloadGroups = @(
               @{
                   Name = "Win10LTSC2021_x86"
@@ -78,12 +148,11 @@ jobs:
               }
           )
 
-          # 遍历每个分组（修复大括号匹配）
+          # ========== 遍历下载分组（调用进度条函数） ==========
           foreach ($group in $downloadGroups) {
               $groupName = $group.Name
               Write-Host "`n=== Processing group: $groupName ==="
               
-              # 下载每个分卷（重试3次）
               foreach ($url in $group.Urls) {
                   $fileName = $url.Split('/')[-1]
                   $savePath = "$env:GITHUB_WORKSPACE\Temp_Win_Image\$fileName"
@@ -94,32 +163,30 @@ jobs:
                     continue
                   }
 
-                  # 下载重试逻辑
+                  # 下载重试逻辑（调用带进度条的函数）
                   $retryCount = 0
                   $maxRetries = 3
                   $downloadSuccess = $false
                   
                   while ($retryCount -lt $maxRetries -and -not $downloadSuccess) {
-                      try {
-                          Write-Host "Downloading (retry $retryCount): $fileName"
-                          Invoke-WebRequest -Uri $url -OutFile $savePath -UseBasicParsing -TimeoutSec 300 -ErrorAction Stop
-                          $downloadSuccess = $true
-                          Write-Host "Download success: $fileName"
-                      } catch {
+                      Write-Host "`nDownload attempt $($retryCount + 1)/$maxRetries: $fileName"
+                      $downloadSuccess = Download-FileWithProgress -Url $url -OutputPath $savePath -TimeoutSec 300
+                      
+                      if (-not $downloadSuccess) {
                           $retryCount++
-                          Write-Warning "Download failed (retry $retryCount/$maxRetries): $($_.Exception.Message)"
+                          Write-Warning "Download failed (attempt $retryCount/$maxRetries), retrying in 5 seconds..."
                           Start-Sleep -Seconds 5
                       }
                   }
 
                   # 下载失败终止
                   if (-not $downloadSuccess) {
-                      Write-Error "Download failed after max retries: $fileName"
+                      Write-Error "Download failed after $maxRetries retries: $fileName"
                       exit 1
                   }
               }
 
-              # 解压分卷（修复大括号匹配）
+              # ========== 原有解压/提取/导出逻辑（无修改） ==========
               Write-Host "Extracting split archives: $groupName"
               $7zFirstFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.001" | Where-Object { $_.Name -match $groupName } | Select-Object -First 1
               if (-not $7zFirstFile) {
@@ -127,7 +194,6 @@ jobs:
                   exit 1
               }
 
-              # 执行解压
               & "C:\Program Files\7-Zip\7z.exe" x -y -o"$env:GITHUB_WORKSPACE\Temp_Win_Image" $7zFirstFile.FullName | Out-Null
               if ($LASTEXITCODE -ne 0) {
                   Write-Error "Extract failed for $groupName (7-Zip exit code: $LASTEXITCODE)"
@@ -135,7 +201,6 @@ jobs:
               }
               Write-Host "Extract success: $groupName"
 
-              # 提取ISO中的install.esd
               Write-Host "Extracting install.esd from ISO: $groupName"
               $isoFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.iso" | Where-Object { $_.Name -match $groupName } | Select-Object -First 1
               if (-not $isoFile) {
@@ -143,14 +208,12 @@ jobs:
                   exit 1
               }
 
-              # 解压install.esd
               & "C:\Program Files\7-Zip\7z.exe" x -y -o"$env:GITHUB_WORKSPACE\Temp_Win_Image" $isoFile.FullName "sources/install.esd" | Out-Null
               if ($LASTEXITCODE -ne 0) {
                   Write-Error "install.esd not found in ISO for $groupName"
                   exit 1
               }
 
-              # 验证install.esd
               $esdFile = "$env:GITHUB_WORKSPACE\Temp_Win_Image\sources\install.esd"
               if (-not (Test-Path $esdFile)) {
                   Write-Error "install.esd extraction failed: $esdFile not exists"
@@ -158,7 +221,6 @@ jobs:
               }
               Write-Host "install.esd extract success: $esdFile"
 
-              # 导出映像到WIM（修复&转义：用`&转义保留字符）
               Write-Host "Exporting image 1 to WIM: $groupName"
               $targetWim = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
               $dismArgs = @(
@@ -171,7 +233,6 @@ jobs:
                   "/quiet"
               )
 
-              # 首次导出创建WIM，后续追加
               if (-not (Test-Path $targetWim)) {
                   dism @dismArgs
               } else {
@@ -184,16 +245,15 @@ jobs:
               }
               Write-Host "Image export success: $groupName"
 
-              # 清理临时文件（英文日志，修复大括号）
               Write-Host "Cleaning temporary files for $groupName"
               Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.*" -Force -ErrorAction SilentlyContinue
               Remove-Item $isoFile.FullName -Force -ErrorAction SilentlyContinue
               Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image\sources" -Recurse -Force -ErrorAction SilentlyContinue
               Write-Host "Temporary files cleaned for $groupName"
-          } # 闭合foreach ($group in $downloadGroups)
+          }
         shell: powershell
 
-      # 转换WIM为ESD（修复&转义）
+      # 转换WIM为ESD（无修改）
       - name: Convert WIM to ESD (recovery compression)
         run: |
           $targetWim = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
@@ -220,7 +280,7 @@ jobs:
           Write-Host "WIM to ESD convert success: $targetEsd"
         shell: powershell
 
-      # 分卷压缩ESD（修复&转义）
+      # 分卷压缩ESD（无修改）
       - name: Split ESD into 1950MB volumes (7z)
         run: |
           $targetEsd = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
@@ -245,7 +305,6 @@ jobs:
               exit 1
           }
 
-          # 验证分卷
           $splitFiles = Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.001"
           if (-not $splitFiles) {
               Write-Error "No split files generated"
@@ -255,7 +314,7 @@ jobs:
           Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.*" | ForEach-Object { Write-Host " - $($_.Name)" }
         shell: powershell
 
-      # 发布到Releases（修复&转义）
+      # 发布到Releases（无修改）
       - name: Publish split files to GitHub Releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -268,11 +327,9 @@ jobs:
               exit 1
           }
 
-          # 登录GitHub CLI
           Write-Host "Logging in to GitHub CLI..."
           echo $env:GITHUB_TOKEN | gh auth login --with-token
           
-          # 检查Release是否存在
           $releaseExists = $false
           if (gh release view $releaseName 2>$null) {
               $releaseExists = $true
@@ -281,7 +338,6 @@ jobs:
               Write-Host "Release not exists, create new release: $releaseName"
           }
 
-          # 发布文件
           if ($releaseExists) {
               foreach ($file in $splitFiles) {
                   gh release upload $releaseName $file.FullName --clobber
@@ -304,7 +360,7 @@ jobs:
           }
         shell: powershell
 
-      # 清理临时文件（英文日志）
+      # 清理临时文件（无修改）
       - name: Cleanup all temporary files
         if: always()
         run: |
