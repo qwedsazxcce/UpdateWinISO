@@ -1,4 +1,4 @@
-name: Windows_ESD
+name: Windows_LTSC_ESD
 
 # 触发条件：手动触发（workflow_dispatch），也可添加push/tag触发
 on:
