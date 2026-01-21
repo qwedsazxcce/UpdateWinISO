@@ -1,137 +1,164 @@
-@echo off
-chcp 65001 >nul
-setlocal enabledelayedexpansion
+name: Windows_10-11_ESD
 
-:: ====================== 配置项 ======================
-:: 目标WIM/ESD文件名（注意空格需加引号）
-set "TARGET_WIM=Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
-set "TARGET_ESD=Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
-:: GitHub Releases发布的仓库名（格式：用户名/仓库名）
-set "GITHUB_REPO=qwedsazxcce/UpdateWinISO"
-:: 7-Zip路径（若安装路径不同，修改此处）
-set "7Z_PATH=C:\Program Files\7-Zip\7z.exe"
-:: 临时目录（用于解压/提取文件，脚本结束自动删除）
-set "TEMP_DIR=%cd%\Temp_Win_Image"
-md "%TEMP_DIR%" >nul 2>&1
-:: ====================== 配置项结束 ======================
+# 触发条件：手动触发（workflow_dispatch），也可添加push/tag触发
+on:
+  workflow_dispatch:
 
-:: 定义需要处理的下载分组（每组对应一个ISO，格式：分组名|分卷链接1|分卷链接2|...）
-set "DOWNLOAD_GROUPS=(
-    Win10LTSC2021_x86|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
-    Win10LTSC2021_amd64|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
-    Win11LTSC2024_amd64|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002|https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
-)"
+# 运行环境和任务配置
+jobs:
+  build-esd:
+    # 使用Windows Server 2022 runner（自带DISM、PowerShell，兼容7-Zip）
+    runs-on: windows-2022
+    
+    steps:
+      # 步骤1：检出仓库（可选，若无需仓库文件可注释）
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-:: 遍历每个下载分组
-for %%G in %DOWNLOAD_GROUPS% do (
-    :: 拆分分组名和链接（按|分割）
-    for /f "tokens=1,* delims=|" %%A in ("%%G") do (
-        set "GROUP_NAME=%%A"
-        set "LINKS=%%B"
-        echo.
-        echo ==============================================
-        echo 开始处理分组：!GROUP_NAME!
-        echo ==============================================
+      # 步骤2：安装7-Zip（Windows runner默认已安装，若缺失则执行此步骤）
+      - name: Install 7-Zip
+        run: |
+          if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) {
+            choco install 7zip -y
+          }
 
-        :: 步骤1：下载分卷压缩包到临时目录
-        echo [1/5] 下载分卷压缩包...
-        for %%L in (!LINKS!) do (
-            set "URL=%%L"
-            :: 提取文件名（从URL最后一个/后截取）
-            for /f "delims=/ tokens=*" %%F in ("!URL!") do set "FILE_NAME=%%F"
-            echo 正在下载：!FILE_NAME!
-            powershell -Command "(New-Object System.Net.WebClient).DownloadFile('!URL!', '%TEMP_DIR%\!FILE_NAME!')"
-            if errorlevel 1 (
-                echo 错误：下载!FILE_NAME!失败，退出脚本
-                goto CLEANUP
-            )
-        )
+      # 步骤3：安装GitHub CLI（用于发布Release）
+      - name: Install GitHub CLI
+        run: |
+          winget install GitHub.cli -y --silent
 
-        :: 步骤2：解压分卷压缩包（7z解压第一个分卷即可自动识别所有分卷）
-        echo [2/5] 解压分卷压缩包...
-        :: 找到第一个分卷（.7z.001）
-        for /f "delims=" %%F in ('dir /b "%TEMP_DIR%\*.7z.001"') do set "FIRST_7Z=%TEMP_DIR%\%%F"
-        "!7Z_PATH!" x -y -o"%TEMP_DIR%" "!FIRST_7Z!" >nul
-        if errorlevel 1 (
-            echo 错误：解压分卷失败，退出脚本
-            goto CLEANUP
-        )
-        :: 提取ISO文件名（临时目录下的.iso文件）
-        for /f "delims=" %%F in ('dir /b "%TEMP_DIR%\*.iso"') do set "ISO_FILE=%TEMP_DIR%\%%F"
-        echo 解压完成，ISO文件：!ISO_FILE!
+      # 步骤4：创建临时目录，避免路径混乱
+      - name: Create temp directory
+        run: mkdir -Force $env:GITHUB_WORKSPACE\Temp_Win_Image
 
-        :: 步骤3：从ISO中提取install.esd
-        echo [3/5] 从ISO提取install.esd...
-        "!7Z_PATH!" x -y -o"%TEMP_DIR%" "!ISO_FILE!" "sources/install.esd" >nul
-        if errorlevel 1 (
-            echo 错误：提取install.esd失败，退出脚本
-            goto CLEANUP
-        )
-        set "ESD_FILE=%TEMP_DIR%\sources\install.esd"
-        if not exist "!ESD_FILE!" (
-            echo 错误：未找到install.esd文件，退出脚本
-            goto CLEANUP
-        )
+      # 步骤5：批量下载分卷压缩包（对应你之前的3组文件）
+      - name: Download ISO split archives
+        run: |
+          # 定义下载链接（按组分类）
+          $downloadGroups = @(
+              @{
+                  Name = "Win10LTSC2021_x86"
+                  Urls = @(
+                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001",
+                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002"
+                  )
+              },
+              @{
+                  Name = "Win10LTSC2021_amd64"
+                  Urls = @(
+                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001",
+                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002",
+                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003"
+                  )
+              },
+              @{
+                  Name = "Win11LTSC2024_amd64"
+                  Urls = @(
+                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001",
+                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002",
+                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003"
+                  )
+              }
+          )
 
-        :: 步骤4：从install.esd导出第一个映像到目标WIM
-        echo [4/5] 导出第一个映像到!TARGET_WIM!...
-        if not exist "!TARGET_WIM!" (
-            :: 首次导出：创建新WIM
-            dism /export-image /sourceimagefile:"!ESD_FILE!" /sourceindex:1 /destinationimagefile:"!TARGET_WIM!" /compress:max /checkintegrity /quiet
-        ) else (
-            :: 后续导出：追加到现有WIM
-            dism /export-image /sourceimagefile:"!ESD_FILE!" /sourceindex:1 /destinationimagefile:"!TARGET_WIM!" /destinationindex:2 /compress:max /checkintegrity /quiet
-        )
-        if errorlevel 1 (
-            echo 错误：导出映像失败，退出脚本
-            goto CLEANUP
-        )
+          # 遍历下载每组分卷
+          foreach ($group in $downloadGroups) {
+              Write-Host "=== 下载分组：$($group.Name) ==="
+              foreach ($url in $group.Urls) {
+                  $fileName = $url.Split('/')[-1]
+                  $savePath = "$env:GITHUB_WORKSPACE\Temp_Win_Image\$fileName"
+                  Write-Host "下载：$fileName"
+                  Invoke-WebRequest -Uri $url -OutFile $savePath -UseBasicParsing
+              }
 
-        :: 步骤5：清理当前分组的临时文件（7z分卷、ISO、install.esd）
-        echo [5/5] 清理临时文件...
-        del /f /q "%TEMP_DIR%\*.7z.*" >nul
-        del /f /q "!ISO_FILE!" >nul
-        rd /s /q "%TEMP_DIR%\sources" >nul
-        echo 分组!GROUP_NAME!处理完成，临时文件已清理
-    )
-)
+              # 解压分卷（只需解压.001文件，7-Zip自动识别所有分卷）
+              Write-Host "=== 解压分组：$($group.Name) ==="
+              $7zFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.001" | Select-Object -First 1
+              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$env:GITHUB_WORKSPACE\Temp_Win_Image" $7zFile.FullName | Out-Null
 
-:: 转换WIM为ESD（压缩率更高的recovery模式）
-echo.
-echo ==============================================
-echo 开始转换WIM为ESD...
-echo ==============================================
-dism /export-image /sourceimagefile:"%TARGET_WIM%" /sourceindex:all /destinationimagefile:"%TARGET_ESD%" /compress:recovery /checkintegrity /quiet
-if errorlevel 1 (
-    echo 错误：转换WIM为ESD失败
-    goto CLEANUP
-)
-echo WIM转ESD完成，生成文件：%TARGET_ESD%
+              # 提取ISO中的install.esd
+              Write-Host "=== 提取install.esd ==="
+              $isoFile = Get-ChildItem "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.iso" | Select-Object -First 1
+              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$env:GITHUB_WORKSPACE\Temp_Win_Image" $isoFile.FullName "sources/install.esd" | Out-Null
 
-:: 发布到GitHub Releases
-echo.
-echo ==============================================
-echo 发布到GitHub Releases...
-echo ==============================================
-:: 创建Release（若已存在则跳过）
-gh release create "%TARGET_WIM%" "%TARGET_ESD%" --repo "%GITHUB_REPO%" --title "%TARGET_WIM%" --notes "自动构建的Windows LTSC镜像（WIM转ESD）"
-if errorlevel 1 (
-    echo 提示：Release可能已存在，尝试仅上传文件
-    gh release upload "%TARGET_WIM%" "%TARGET_ESD%" --repo "%GITHUB_REPO%"
-)
-echo 发布完成！
+              # 导出第一个映像到目标WIM
+              Write-Host "=== 导出映像到WIM ==="
+              $esdFile = "$env:GITHUB_WORKSPACE\Temp_Win_Image\sources\install.esd"
+              $targetWim = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
+              
+              if (-not (Test-Path $targetWim)) {
+                  # 首次导出：创建新WIM
+                  dism /export-image /sourceimagefile:$esdFile /sourceindex:1 /destinationimagefile:$targetWim /compress:max /checkintegrity /quiet
+              } else {
+                  # 后续导出：追加到WIM（自动分配新索引）
+                  dism /export-image /sourceimagefile:$esdFile /sourceindex:1 /destinationimagefile:$targetWim /compress:max /checkintegrity /quiet
+              }
 
-:: 最终清理临时目录
-:CLEANUP
-echo.
-echo ==============================================
-echo 清理最终临时文件...
-echo ==============================================
-rd /s /q "%TEMP_DIR%" >nul
-if exist "%TARGET_WIM%" (
-    echo 保留目标文件：%TARGET_WIM%
-    echo 保留目标文件：%TARGET_ESD%
-)
-echo 脚本执行完成！
-pause
-exit /b 0
+              # 清理当前分组临时文件（节约空间）
+              Write-Host "=== 清理临时文件 ==="
+              Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image\*.7z.*" -Force
+              Remove-Item $isoFile.FullName -Force
+              Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image\sources" -Recurse -Force
+          }
+        shell: powershell
+
+      # 步骤6：转换WIM为ESD
+      - name: Convert WIM to ESD
+        run: |
+          $targetWim = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
+          $targetEsd = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
+          dism /export-image /sourceimagefile:$targetWim /sourceindex:all /destinationimagefile:$targetEsd /compress:recovery /checkintegrity /quiet
+        shell: powershell
+
+      # ========== 新增：分卷压缩ESD文件（1950MB/卷） ==========
+      - name: Split ESD file into 1950MB volumes
+        run: |
+          $targetEsd = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
+          $splitOutput = "$env:GITHUB_WORKSPACE\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z"
+          
+          # 7-Zip分卷压缩：-v1950m 表示每个分卷1950MB，-t7z 指定7z格式，-mx9 最高压缩率
+          & "C:\Program Files\7-Zip\7z.exe" a -t7z -mx9 -v1950m $splitOutput $targetEsd
+          
+          # 验证分卷文件是否生成
+          $splitFiles = Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.001"
+          if (-not $splitFiles) {
+              Write-Error "分卷压缩失败，未生成分卷文件！"
+              exit 1
+          }
+          Write-Host "分卷压缩完成，生成文件："
+          Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.*" | ForEach-Object { Write-Host $_.Name }
+        shell: powershell
+
+      # ========== 修改：发布分卷文件到Releases（替代原ESD文件） ==========
+      - name: Publish split files to GitHub Releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动生成的令牌，无需手动配置
+        run: |
+          $releaseName = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025"
+          $splitFiles = Get-ChildItem "$env:GITHUB_WORKSPACE\*.7z.*" | Sort-Object Name
+          
+          # 登录GitHub CLI（使用内置令牌）
+          gh auth login --with-token <<< $env:GITHUB_TOKEN
+          
+          # 创建Release（若已存在则更新）
+          if (gh release view $releaseName 2>$null) {
+              # 覆盖已存在的分卷文件
+              foreach ($file in $splitFiles) {
+                  gh release upload $releaseName $file.FullName --clobber
+              }
+          } else {
+              # 新建Release并上传所有分卷
+              gh release create $releaseName $splitFiles.FullName --title $releaseName --notes "Auto-built Windows LTSC ESD (split into 1950MB volumes)"
+          }
+        shell: powershell
+
+      # 步骤8：清理所有临时文件（包含原ESD和临时目录）
+      - name: Cleanup temp files
+        if: always()  # 无论前面步骤是否失败，都执行清理
+        run: |
+          # 清理临时目录
+          Remove-Item "$env:GITHUB_WORKSPACE\Temp_Win_Image" -Recurse -Force -ErrorAction SilentlyContinue
+          # 可选：保留分卷文件，删除原ESD和WIM（节约空间）
+          Remove-Item "$env:GITHUB_WORKSPACE\*.wim" -Force -ErrorAction SilentlyContinue
+          Remove-Item "$env:GITHUB_WORKSPACE\*.esd" -Force -ErrorAction SilentlyContinue
+        shell: powershell
