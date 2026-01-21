@@ -1,8 +1,26 @@
 name: Windows_LTSC_ESD
 
+# ========== 下载地址集中配置（仅需修改这里） ==========
+env:
+  # Win10 LTSC2021 x86 分卷下载地址
+  WIN10_X86_001_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001"
+  WIN10_X86_002_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002"
+  
+  # Win10 LTSC2021 x64 分卷下载地址
+  WIN10_X64_001_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001"
+  WIN10_X64_002_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002"
+  WIN10_X64_003_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003"
+  
+  # Win11 LTSC2024 x64 分卷下载地址
+  WIN11_X64_001_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001"
+  WIN11_X64_002_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002"
+  WIN11_X64_003_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003"
+
+# 触发条件：手动触发
 on:
   workflow_dispatch:
 
+# 运行环境和任务配置
 jobs:
   build-esd:
     runs-on: windows-2022
@@ -12,325 +30,430 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 安装7-Zip（BAT脚本）
       - name: Install 7-Zip
+        shell: cmd
         run: |
-          if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) {
-            Write-Host "7-Zip not installed, installing via choco..."
+          @echo off
+          if not exist "C:\Program Files\7-Zip\7z.exe" (
+            echo 7-Zip not installed, installing via choco...
             choco install 7zip -y --no-progress
-          } else {
-            Write-Host "7-Zip is already installed"
-          }
-        shell: powershell
-
-      - name: Install GitHub CLI (gh)
-        run: |
-          if (-not (Get-Command "gh" -ErrorAction SilentlyContinue)) {
-            Write-Host "GitHub CLI not installed, installing via choco..."
-            choco install gh -y --no-progress
-          } else {
-            Write-Host "GitHub CLI is already installed"
-          }
-        shell: powershell
-
-      - name: Create temporary directory
-        run: |
-          $tempDir = "$env:GITHUB_WORKSPACE\Temp_Win_Image"
-          if (-not (Test-Path $tempDir)) {
-            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-            Write-Host "Temporary directory created: $tempDir"
-          } else {
-            Write-Host "Temporary directory already exists: $tempDir"
-          }
-        shell: powershell
-
-      - name: Download ISO split archives (curl)
-        run: |
-          # 定义下载分组
-          $downloadGroups = @(
-              @{
-                  Name = "Win10LTSC2021_x86"
-                  Urls = @(
-                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001",
-                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002"
-                  )
-              },
-              @{
-                  Name = "Win10LTSC2021_amd64"
-                  Urls = @(
-                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001",
-                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002",
-                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003"
-                  )
-              },
-              @{
-                  Name = "Win11LTSC2024_amd64"
-                  Urls = @(
-                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001",
-                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002",
-                      "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003"
-                  )
-              }
+          ) else (
+            echo 7-Zip is already installed
           )
 
-          # 遍历下载分组
-          foreach ($group in $downloadGroups) {
-              $groupName = $group.Name
-              $tempDir = "$env:GITHUB_WORKSPACE\Temp_Win_Image" # 明确临时目录路径
-              Write-Host "`n=== Processing group: $groupName ==="
-              
-              # 下载所有分卷
-              foreach ($url in $group.Urls) {
-                  $fileName = $url.Split('/')[-1]
-                  $savePath = Join-Path -Path $tempDir -ChildPath $fileName # 用Join-Path避免路径拼接错误
-                  
-                  # 检查文件是否已存在
-                  if (Test-Path $savePath) {
-                    Write-Host "File already exists, skip download: $fileName"
-                    continue
-                  }
+      # 安装GitHub CLI（BAT脚本）
+      - name: Install GitHub CLI (gh)
+        shell: cmd
+        run: |
+          @echo off
+          where gh >nul 2>&1
+          if errorlevel 1 (
+            echo GitHub CLI not installed, installing via choco...
+            choco install gh -y --no-progress
+          ) else (
+            echo GitHub CLI is already installed
+          )
 
-                  # curl下载逻辑
-                  $retryCount = 0
-                  $maxRetries = 3
-                  $downloadSuccess = $false
-                  
-                  while ($retryCount -lt $maxRetries -and -not $downloadSuccess) {
-                      Write-Host "`nDownload attempt ${retryCount + 1}/${maxRetries}: $fileName"
-                      
-                      curl.exe -L -o "$savePath" `
-                          --progress-bar `
-                          --retry 2 `
-                          --retry-delay 5 `
-                          --connect-timeout 30 `
-                          --max-time 600 `
-                          $url
-                      
-                      if ($LASTEXITCODE -eq 0) {
-                          $downloadSuccess = $true
-                          Write-Host "`nDownload success: $fileName"
-                          # 验证文件是否真的存在
-                          if (-not (Test-Path $savePath)) {
-                              Write-Warning "File download reported success but not found: $savePath"
-                              $downloadSuccess = $false
-                              $retryCount++
-                              Start-Sleep -Seconds 5
-                          }
-                      } else {
-                          $retryCount++
-                          Write-Warning "Download failed (curl exit code: $LASTEXITCODE), attempt ${retryCount}/${maxRetries}, retrying in 5 seconds..."
-                          if (Test-Path $savePath) { Remove-Item $savePath -Force }
-                          Start-Sleep -Seconds 5
-                      }
-                  }
+      # 创建临时目录（BAT脚本）
+      - name: Create temporary directory
+        shell: cmd
+        run: |
+          @echo off
+          set "tempDir=%GITHUB_WORKSPACE%\Temp_Win_Image"
+          if not exist "%tempDir%" (
+            mkdir "%tempDir%"
+            echo Temporary directory created: %tempDir%
+          ) else (
+            echo Temporary directory already exists: %tempDir%
+          )
 
-                  if (-not $downloadSuccess) {
-                      Write-Error "Download failed after ${maxRetries} retries: $fileName"
-                      exit 1
-                  }
-              }
+      # 核心：下载+解压+提取ESD（BAT脚本，引用环境变量）
+      - name: Download & Extract ISO files (BAT)
+        shell: cmd
+        run: |
+          @echo off
+          setlocal enabledelayedexpansion
+          
+          :: 定义路径常量
+          set "tempDir=%GITHUB_WORKSPACE%\Temp_Win_Image"
+          set "7zPath=C:\Program Files\7-Zip\7z.exe"
+          set "targetWim=%GITHUB_WORKSPACE%\Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025.wim"
+          
+          :: ========== 下载函数（复用逻辑） ==========
+          :download_file
+          set "url=%~1"
+          set "savePath=%~2"
+          set "retryCount=0"
+          set "maxRetries=3"
+          
+          :: 检查文件是否已存在
+          if exist "!savePath!" (
+            echo File already exists, skip download: !savePath!
+            exit /b 0
+          )
+          
+          :download_retry
+          echo.
+          echo Download attempt !retryCount!+1/!maxRetries!: !savePath!
+          curl.exe -L -o "!savePath!" ^
+            --progress-bar ^
+            --retry 2 ^
+            --retry-delay 5 ^
+            --connect-timeout 30 ^
+            --max-time 600 ^
+            "!url!"
+          
+          :: 检查curl执行结果
+          if errorlevel 0 if not errorlevel 1 (
+            echo Download success: !savePath!
+            :: 验证文件是否真的存在
+            if exist "!savePath!" (
+              exit /b 0
+            ) else (
+              echo Warning: File not found after download
+            )
+          )
+          
+          :: 重试逻辑
+          set /a retryCount+=1
+          if !retryCount! lss !maxRetries! (
+            echo Download failed (curl exit code: %errorlevel%), retrying in 5 seconds...
+            if exist "!savePath!" del /f /q "!savePath!"
+            timeout /t 5 /nobreak >nul
+            goto download_retry
+          )
+          
+          echo Download failed after !maxRetries! retries: !savePath!
+          exit /b 1
+          
+          :: ========== 1. 处理Win10LTSC2021_x86 ==========
+          echo.
+          echo === Processing group: Win10LTSC2021_x86 ===
+          :: 拼接保存路径（从URL提取文件名）
+          for %%f in ("%WIN10_X86_001_URL%") do set "savePath1=%tempDir%\%%~nxf"
+          for %%f in ("%WIN10_X86_002_URL%") do set "savePath2=%tempDir%\%%~nxf"
+          
+          :: 调用下载函数
+          call :download_file "%WIN10_X86_001_URL%" "!savePath1!"
+          if errorlevel 1 exit /b 1
+          call :download_file "%WIN10_X86_002_URL%" "!savePath2!"
+          if errorlevel 1 exit /b 1
+          
+          :: 显示临时目录文件（调试）
+          echo.
+          echo Files in temp directory (!tempDir!):
+          dir /b "!tempDir!"
+          
+          :: 解压7z分卷（通配符精准定位）
+          echo.
+          echo Extracting split archives: Win10LTSC2021_x86
+          for /f "delims=" %%f in ('dir /b "!tempDir!\Windows10_LTSC2021_x86*.7z.001"') do set "7zFirstFile=!tempDir!\%%f"
+          if not exist "!7zFirstFile!" (
+            echo ERROR: No .7z.001 file found for Win10LTSC2021_x86
+            exit /b 1
+          )
+          echo Found 7z start file: !7zFirstFile!
+          "!7zPath!" x -y -o"!tempDir!" "!7zFirstFile!" >nul
+          if errorlevel 1 (
+            echo Extract failed for Win10LTSC2021_x86
+            exit /b 1
+          )
+          echo Extract success: Win10LTSC2021_x86
+          
+          :: 提取ISO中的install.esd
+          echo.
+          echo Extracting install.esd from ISO: Win10LTSC2021_x86
+          for /f "delims=" %%f in ('dir /b "!tempDir!\Windows10_LTSC2021_x86*.iso"') do set "isoFile=!tempDir!\%%f"
+          if not exist "!isoFile!" (
+            echo No ISO file found for Win10LTSC2021_x86
+            exit /b 1
+          )
+          echo Found ISO file: !isoFile!
+          "!7zPath!" x -y -o"!tempDir!" "!isoFile!" "sources/install.esd" >nul
+          if errorlevel 1 (
+            echo install.esd not found in ISO for Win10LTSC2021_x86
+            exit /b 1
+          )
+          
+          :: 验证ESD文件
+          set "esdFile=!tempDir!\sources\install.esd"
+          if not exist "!esdFile!" (
+            echo install.esd extraction failed: !esdFile!
+            exit /b 1
+          )
+          echo install.esd extract success: !esdFile!
+          
+          :: 导出映像到WIM
+          echo.
+          echo Exporting image 1 to WIM: Win10LTSC2021_x86
+          if not exist "!targetWim!" (
+            dism /export-image /sourceimagefile:"!esdFile!" /sourceindex:1 /destinationimagefile:"!targetWim!" /compress:max /checkintegrity /quiet
+          ) else (
+            dism /export-image /sourceimagefile:"!esdFile!" /sourceindex:1 /destinationimagefile:"!targetWim!" /destinationindex:2 /compress:max /checkintegrity /quiet
+          )
+          if errorlevel 1 (
+            echo Image export failed for Win10LTSC2021_x86
+            exit /b 1
+          )
+          echo Image export success: Win10LTSC2021_x86
+          
+          :: 清理临时文件
+          echo.
+          echo Cleaning temporary files for Win10LTSC2021_x86
+          del /f /q "!tempDir!\Windows10_LTSC2021_x86*.7z.*" >nul
+          del /f /q "!isoFile!" >nul
+          rmdir /s /q "!tempDir!\sources" >nul
+          echo Temporary files cleaned: Win10LTSC2021_x86
 
-              # ========== 修复：解压逻辑（核心修改） ==========
-              Write-Host "Extracting split archives: $groupName"
-              # 1. 输出临时目录下的所有文件，便于调试
-              Write-Host "Files in temp directory ($tempDir):"
-              Get-ChildItem -Path $tempDir -Name | ForEach-Object { Write-Host " - $_" }
-              
-              # 2. 明确查找路径+用Contains替代match（更稳定的字符串包含匹配）
-              $7zFirstFile = Get-ChildItem -Path $tempDir -Filter "*.7z.001" | 
-                              Where-Object { $_.Name.Contains($groupName) } | 
-                              Select-Object -First 1
-              
-              # 3. 更详细的错误提示
-              if (-not $7zFirstFile) {
-                  Write-Error "`nERROR: No .7z.001 file found for $groupName in $tempDir`nCheck if the file was downloaded correctly (see file list above)."
-                  exit 1
-              }
+          :: ========== 2. 处理Win10LTSC2021_amd64（逻辑复用） ==========
+          echo.
+          echo === Processing group: Win10LTSC2021_amd64 ===
+          for %%f in ("%WIN10_X64_001_URL%") do set "savePath1=%tempDir%\%%~nxf"
+          for %%f in ("%WIN10_X64_002_URL%") do set "savePath2=%tempDir%\%%~nxf"
+          for %%f in ("%WIN10_X64_003_URL%") do set "savePath3=%tempDir%\%%~nxf"
+          
+          call :download_file "%WIN10_X64_001_URL%" "!savePath1!"
+          if errorlevel 1 exit /b 1
+          call :download_file "%WIN10_X64_002_URL%" "!savePath2!"
+          if errorlevel 1 exit /b 1
+          call :download_file "%WIN10_X64_003_URL%" "!savePath3!"
+          if errorlevel 1 exit /b 1
+          
+          echo.
+          echo Files in temp directory (!tempDir!):
+          dir /b "!tempDir!"
+          
+          echo.
+          echo Extracting split archives: Win10LTSC2021_amd64
+          for /f "delims=" %%f in ('dir /b "!tempDir!\Windows10_LTSC2021_amd64*.7z.001"') do set "7zFirstFile=!tempDir!\%%f"
+          if not exist "!7zFirstFile!" (
+            echo ERROR: No .7z.001 file found for Win10LTSC2021_amd64
+            exit /b 1
+          )
+          echo Found 7z start file: !7zFirstFile!
+          "!7zPath!" x -y -o"!tempDir!" "!7zFirstFile!" >nul
+          if errorlevel 1 (
+            echo Extract failed for Win10LTSC2021_amd64
+            exit /b 1
+          )
+          echo Extract success: Win10LTSC2021_amd64
+          
+          echo.
+          echo Extracting install.esd from ISO: Win10LTSC2021_amd64
+          for /f "delims=" %%f in ('dir /b "!tempDir!\Windows10_LTSC2021_amd64*.iso"') do set "isoFile=!tempDir!\%%f"
+          if not exist "!isoFile!" (
+            echo No ISO file found for Win10LTSC2021_amd64
+            exit /b 1
+          )
+          echo Found ISO file: !isoFile!
+          "!7zPath!" x -y -o"!tempDir!" "!isoFile!" "sources/install.esd" >nul
+          if errorlevel 1 (
+            echo install.esd not found in ISO for Win10LTSC2021_amd64
+            exit /b 1
+          )
+          
+          set "esdFile=!tempDir!\sources\install.esd"
+          if not exist "!esdFile!" (
+            echo install.esd extraction failed: !esdFile!
+            exit /b 1
+          )
+          echo install.esd extract success: !esdFile!
+          
+          echo.
+          echo Exporting image 1 to WIM: Win10LTSC2021_amd64
+          dism /export-image /sourceimagefile:"!esdFile!" /sourceindex:1 /destinationimagefile:"!targetWim!" /destinationindex:3 /compress:max /checkintegrity /quiet
+          if errorlevel 1 (
+            echo Image export failed for Win10LTSC2021_amd64
+            exit /b 1
+          )
+          echo Image export success: Win10LTSC2021_amd64
+          
+          echo.
+          echo Cleaning temporary files for Win10LTSC2021_amd64
+          del /f /q "!tempDir!\Windows10_LTSC2021_amd64*.7z.*" >nul
+          del /f /q "!isoFile!" >nul
+          rmdir /s /q "!tempDir!\sources" >nul
+          echo Temporary files cleaned: Win10LTSC2021_amd64
 
-              Write-Host "Found 7z start file: $($7zFirstFile.FullName)"
-              # 执行解压（明确7z路径）
-              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$tempDir" $7zFirstFile.FullName | Out-Null
-              
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Error "Extract failed for $groupName (7-Zip exit code: $LASTEXITCODE)"
-                  exit 1
-              }
-              Write-Host "Extract success: $groupName"
+          :: ========== 3. 处理Win11LTSC2024_amd64（逻辑复用） ==========
+          echo.
+          echo === Processing group: Win11LTSC2024_amd64 ===
+          for %%f in ("%WIN11_X64_001_URL%") do set "savePath1=%tempDir%\%%~nxf"
+          for %%f in ("%WIN11_X64_002_URL%") do set "savePath2=%tempDir%\%%~nxf"
+          for %%f in ("%WIN11_X64_003_URL%") do set "savePath3=%tempDir%\%%~nxf"
+          
+          call :download_file "%WIN11_X64_001_URL%" "!savePath1!"
+          if errorlevel 1 exit /b 1
+          call :download_file "%WIN11_X64_002_URL%" "!savePath2!"
+          if errorlevel 1 exit /b 1
+          call :download_file "%WIN11_X64_003_URL%" "!savePath3!"
+          if errorlevel 1 exit /b 1
+          
+          echo.
+          echo Files in temp directory (!tempDir!):
+          dir /b "!tempDir!"
+          
+          echo.
+          echo Extracting split archives: Win11LTSC2024_amd64
+          for /f "delims=" %%f in ('dir /b "!tempDir!\Windows11_LTSC2024_amd64*.7z.001"') do set "7zFirstFile=!tempDir!\%%f"
+          if not exist "!7zFirstFile!" (
+            echo ERROR: No .7z.001 file found for Win11LTSC2024_amd64
+            exit /b 1
+          )
+          echo Found 7z start file: !7zFirstFile!
+          "!7zPath!" x -y -o"!tempDir!" "!7zFirstFile!" >nul
+          if errorlevel 1 (
+            echo Extract failed for Win11LTSC2024_amd64
+            exit /b 1
+          )
+          echo Extract success: Win11LTSC2024_amd64
+          
+          echo.
+          echo Extracting install.esd from ISO: Win11LTSC2024_amd64
+          for /f "delims=" %%f in ('dir /b "!tempDir!\Windows11_LTSC2024_amd64*.iso"') do set "isoFile=!tempDir!\%%f"
+          if not exist "!isoFile!" (
+            echo No ISO file found for Win11LTSC2024_amd64
+            exit /b 1
+          )
+          echo Found ISO file: !isoFile!
+          "!7zPath!" x -y -o"!tempDir!" "!isoFile!" "sources/install.esd" >nul
+          if errorlevel 1 (
+            echo install.esd not found in ISO for Win11LTSC2024_amd64
+            exit /b 1
+          )
+          
+          set "esdFile=!tempDir!\sources\install.esd"
+          if not exist "!esdFile!" (
+            echo install.esd extraction failed: !esdFile!
+            exit /b 1
+          )
+          echo install.esd extract success: !esdFile!
+          
+          echo.
+          echo Exporting image 1 to WIM: Win11LTSC2024_amd64
+          dism /export-image /sourceimagefile:"!esdFile!" /sourceindex:1 /destinationimagefile:"!targetWim!" /destinationindex:4 /compress:max /checkintegrity /quiet
+          if errorlevel 1 (
+            echo Image export failed for Win11LTSC2024_amd64
+            exit /b 1
+          )
+          echo Image export success: Win11LTSC2024_amd64
+          
+          echo.
+          echo Cleaning temporary files for Win11LTSC2024_amd64
+          del /f /q "!tempDir!\Windows11_LTSC2024_amd64*.7z.*" >nul
+          del /f /q "!isoFile!" >nul
+          rmdir /s /q "!tempDir!\sources" >nul
+          echo Temporary files cleaned: Win11LTSC2024_amd64
+          
+          endlocal
+          exit /b 0
 
-              # ========== 提取install.esd（同步修复路径） ==========
-              Write-Host "Extracting install.esd from ISO: $groupName"
-              $isoFile = Get-ChildItem -Path $tempDir -Filter "*.iso" | 
-                          Where-Object { $_.Name.Contains($groupName) } | 
-                          Select-Object -First 1
-              
-              if (-not $isoFile) {
-                  Write-Error "No ISO file found for $groupName in $tempDir"
-                  exit 1
-              }
-
-              Write-Host "Found ISO file: $($isoFile.FullName)"
-              & "C:\Program Files\7-Zip\7z.exe" x -y -o"$tempDir" $isoFile.FullName "sources/install.esd" | Out-Null
-              
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Error "install.esd not found in ISO for $groupName (7-Zip exit code: $LASTEXITCODE)"
-                  exit 1
-              }
-
-              $esdFile = Join-Path -Path $tempDir -ChildPath "sources/install.esd"
-              if (-not (Test-Path $esdFile)) {
-                  Write-Error "install.esd extraction failed: $esdFile not exists"
-                  exit 1
-              }
-              Write-Host "install.esd extract success: $esdFile"
-
-              # ========== 导出映像（同步修复路径） ==========
-              Write-Host "Exporting image 1 to WIM: $groupName"
-              $targetWim = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
-              $dismArgs = @(
-                  "/export-image",
-                  "/sourceimagefile:$esdFile",
-                  "/sourceindex:1",
-                  "/destinationimagefile:`"$targetWim`"",
-                  "/compress:max",
-                  "/checkintegrity",
-                  "/quiet"
-              )
-
-              if (-not (Test-Path $targetWim)) {
-                  dism @dismArgs
-              } else {
-                  dism @dismArgs + @("/destinationindex:2")
-              }
-
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Error "Image export failed for $groupName (DISM exit code: $LASTEXITCODE)"
-                  exit 1
-              }
-              Write-Host "Image export success: $groupName"
-
-              # ========== 清理临时文件 ==========
-              Write-Host "Cleaning temporary files for $groupName"
-              Remove-Item -Path $tempDir -Filter "*.7z.*" -Force -ErrorAction SilentlyContinue
-              Remove-Item -Path $isoFile.FullName -Force -ErrorAction SilentlyContinue
-              Remove-Item -Path (Join-Path $tempDir "sources") -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "Temporary files cleaned for $groupName"
-          }
-        shell: powershell
-
-      # 转换WIM为ESD（无修改，仅同步路径写法）
+      # 转换WIM为ESD（BAT脚本）
       - name: Convert WIM to ESD (recovery compression)
+        shell: cmd
         run: |
-          $targetWim = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
-          $targetEsd = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
+          @echo off
+          set "targetWim=%GITHUB_WORKSPACE%\Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025.wim"
+          set "targetEsd=%GITHUB_WORKSPACE%\Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025.esd"
           
-          if (-not (Test-Path $targetWim)) {
-              Write-Error "Target WIM file not exists: $targetWim"
-              exit 1
-          }
+          if not exist "!targetWim!" (
+            echo ERROR: Target WIM file not exists: !targetWim!
+            exit /b 1
+          )
 
-          Write-Host "Converting WIM to ESD (recovery compression)"
-          dism /export-image `
-              /sourceimagefile:$targetWim `
-              /sourceindex:all `
-              /destinationimagefile:$targetEsd `
-              /compress:recovery `
-              /checkintegrity `
-              /quiet
+          echo Converting WIM to ESD (recovery compression)
+          dism /export-image /sourceimagefile:"!targetWim!" /sourceindex:all /destinationimagefile:"!targetEsd!" /compress:recovery /checkintegrity /quiet
+          
+          if errorlevel 1 (
+            echo ERROR: WIM to ESD convert failed (DISM exit code: %errorlevel%)
+            exit /b 1
+          )
+          echo WIM to ESD convert success: !targetEsd!
 
-          if ($LASTEXITCODE -ne 0) {
-              Write-Error "WIM to ESD convert failed (DISM exit code: $LASTEXITCODE)"
-              exit 1
-          }
-          Write-Host "WIM to ESD convert success: $targetEsd"
-        shell: powershell
-
-      # 分卷压缩ESD（同步路径写法）
+      # 分卷压缩ESD（BAT脚本）
       - name: Split ESD into 1950MB volumes (7z)
+        shell: cmd
         run: |
-          $targetEsd = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
-          $splitPrefix = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.7z"
+          @echo off
+          set "7zPath=C:\Program Files\7-Zip\7z.exe"
+          set "targetEsd=%GITHUB_WORKSPACE%\Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025.esd"
+          set "splitPrefix=%GITHUB_WORKSPACE%\Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025.7z"
           
-          if (-not (Test-Path $targetEsd)) {
-              Write-Error "Target ESD file not exists: $targetEsd"
-              exit 1
-          }
+          if not exist "!targetEsd!" (
+            echo ERROR: Target ESD file not exists: !targetEsd!
+            exit /b 1
+          )
 
-          Write-Host "Splitting ESD into 1950MB volumes"
-          & "C:\Program Files\7-Zip\7z.exe" a `
-              -t7z `
-              -mx9 `
-              -v1950m `
-              -bb1 `
-              $splitPrefix `
-              $targetEsd
+          echo Splitting ESD into 1950MB volumes
+          "!7zPath!" a -t7z -mx9 -v1950m -bb1 "!splitPrefix!" "!targetEsd!"
+          
+          if errorlevel 1 (
+            echo ERROR: ESD split failed (7-Zip exit code: %errorlevel%)
+            exit /b 1
+          )
 
-          if ($LASTEXITCODE -ne 0) {
-              Write-Error "ESD split failed (7-Zip exit code: $LASTEXITCODE)"
-              exit 1
-          }
+          echo ESD split success, generated files:
+          dir /b "%GITHUB_WORKSPACE%\*.7z.*"
 
-          $splitFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "*.7z.001"
-          if (-not $splitFiles) {
-              Write-Error "No split files generated"
-              exit 1
-          }
-          Write-Host "ESD split success, generated files:"
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "*.7z.*" | ForEach-Object { Write-Host " - $($_.Name)" }
-        shell: powershell
-
-      # 发布到Releases（同步路径写法）
+      # 发布到GitHub Releases（BAT脚本）
       - name: Publish split files to GitHub Releases
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: cmd
         run: |
-          $releaseName = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025"
-          $splitFiles = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "*.7z.*" | Sort-Object Name
+          @echo off
+          set "releaseName=Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025"
           
-          if (-not $splitFiles) {
-              Write-Error "No split files to publish"
-              exit 1
-          }
-
-          Write-Host "Logging in to GitHub CLI..."
-          echo $env:GITHUB_TOKEN | gh auth login --with-token
+          :: 登录GitHub CLI
+          echo Logging in to GitHub CLI...
+          echo %GITHUB_TOKEN% | gh auth login --with-token
           
-          $releaseExists = $false
-          if (gh release view $releaseName 2>$null) {
-              $releaseExists = $true
-              Write-Host "Release exists: $releaseName, overwrite existing files"
-          } else {
-              Write-Host "Release not exists, create new release: $releaseName"
-          }
+          :: 检查Release是否存在
+          gh release view "!releaseName!" >nul 2>&1
+          if errorlevel 0 if not errorlevel 1 (
+            set "releaseExists=1"
+            echo Release exists: !releaseName!, overwrite existing files
+          ) else (
+            set "releaseExists=0"
+            echo Release not exists, create new release: !releaseName!
+          )
+          
+          :: 获取分卷文件列表
+          for /f "delims=" %%f in ('dir /b "%GITHUB_WORKSPACE%\*.7z.*"') do set "splitFiles=!splitFiles! "%GITHUB_WORKSPACE%\%%f""
+          
+          if "!splitFiles!"=="" (
+            echo ERROR: No split files to publish
+            exit /b 1
+          )
+          
+          :: 发布/更新Release
+          if !releaseExists! equ 1 (
+            :: 删除原有文件（避免重复）
+            gh release delete-asset "!releaseName!" *.7z.* -y >nul 2>&1
+            :: 上传新文件
+            gh release upload "!releaseName!" !splitFiles! --clobber
+          ) else (
+            gh release create "!releaseName!" !splitFiles! --title "!releaseName!" --notes "Auto-built Windows LTSC ESD (split into 1950MB volumes)"
+          )
+          
+          if errorlevel 1 (
+            echo ERROR: Release publish failed (gh exit code: %errorlevel%)
+            exit /b 1
+          )
+          echo New release created/uploaded success: !releaseName!
 
-          if ($releaseExists) {
-              foreach ($file in $splitFiles) {
-                  gh release upload $releaseName $file.FullName --clobber
-                  if ($LASTEXITCODE -ne 0) {
-                      Write-Error "Upload failed: $($file.Name)"
-                      exit 1
-                  }
-                  Write-Host "Upload success: $($file.Name)"
-              }
-          } else {
-              gh release create $releaseName `
-                  $splitFiles.FullName `
-                  --title $releaseName `
-                  --notes "Auto-built Windows LTSC ESD (split into 1950MB volumes)"
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Error "Create release and upload failed"
-                  exit 1
-              }
-              Write-Host "New release created and uploaded success"
-          }
-        shell: powershell
-
-      # 清理临时文件
+      # 清理临时文件（BAT脚本）
       - name: Cleanup all temporary files
         if: always()
+        shell: cmd
         run: |
-          $tempDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Temp_Win_Image"
-          Write-Host "Cleaning all temporary files..."
-          Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path (Join-Path $env:GITHUB_WORKSPACE "*.wim") -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path (Join-Path $env:GITHUB_WORKSPACE "*.esd") -Force -ErrorAction SilentlyContinue
-          Write-Host "Temporary files cleanup completed"
-        shell: powershell
+          @echo off
+          set "tempDir=%GITHUB_WORKSPACE%\Temp_Win_Image"
+          echo Cleaning all temporary files...
+          
+          :: 删除临时目录
+          if exist "!tempDir!" rmdir /s /q "!tempDir!"
+          :: 删除WIM/ESD文件
+          del /f /q "%GITHUB_WORKSPACE%\*.wim" >nul
+          del /f /q "%GITHUB_WORKSPACE%\*.esd" >nul
+          
+          echo Temporary files cleanup completed
