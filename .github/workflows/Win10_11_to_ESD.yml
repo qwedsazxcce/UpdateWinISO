@@ -1,4 +1,4 @@
-name:Win10_11_to_ESD
+name:Win10_11_ESD
 @echo off
 chcp 65001 >nul
 setlocal enabledelayedexpansion
