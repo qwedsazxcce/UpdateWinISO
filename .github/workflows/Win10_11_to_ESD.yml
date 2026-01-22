@@ -1,377 +1,319 @@
-name: Windows_10-11_ESD_Build (ASCII/7z Fix)
+<#
+Win10/11 LTSC 映像合并发布脚本
+核心功能：7z分卷下载→解压→WIM合并→ESD转换→分卷→GitHub Releases发布
+特性：纯英文日志、实时下载进度、逐源清理临时文件、UTF-8编码规避非ASCII问题
+#>
 
-on:
-  workflow_dispatch:
+# ====================== 第一层：固定名称配置 ======================
+$releaseName = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025"
+$targetWimName = "$releaseName.wim"
+$targetEsdName = "$releaseName.esd"
+$splitSize = "1950M"          # 分卷大小
+$artifactRetentionDays = 3    # Artifact保留天数
 
-env:
-  # Core filenames (PURE ASCII/ENGLISH)
-  TARGET_WIM: Windows10_LTSC_2021_32_64_Windows_11_LTSC_2025.wim
-  TARGET_ESD: Windows10_LTSC_2021_32_64_Windows_11_LTSC_2025.esd
-  RELEASE_TAG: Windows10_LTSC_2021_32_64_Windows_11_LTSC_2025
-  SPLIT_SIZE: 1950M
-  RETENTION_DAYS: 3
-  WORK_DIR: "${{ github.workspace }}\\win_build"
-  # Explicit 7z path (avoid syntax error)
-  SEVEN_ZIP_PATH: "${env:ProgramFiles}\\7-Zip\\7z.exe"
+# ====================== 第二层：环境变量（下载地址，可直接替换） ======================
+$downloadSources = @(
+    @{
+        Name = "Win10_LTSC2021_x86"
+        Urls = @(
+            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001",
+            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002"
+        )
+    },
+    @{
+        Name = "Win10_LTSC2021_x64"
+        Urls = @(
+            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001",
+            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002",
+            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003"
+        )
+    },
+    @{
+        Name = "Win11_LTSC2024_x64"
+        Urls = @(
+            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001",
+            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002",
+            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003"
+        )
+    }
+)
 
-  # Download URLs (PURE ASCII)
-  WIN10_X86_VOL1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
-  WIN10_X86_VOL2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
-  WIN10_X64_VOL1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001
-  WIN10_X64_VOL2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002
-  WIN10_X64_VOL3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
-  WIN11_X64_VOL1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001
-  WIN11_X64_VOL2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
-  WIN11_X64_VOL3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
+# ====================== 第三层：核心业务代码 ======================
+# 全局配置
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8  # 规避非ASCII编码问题
+$workDir = Join-Path -Path $PWD.Path -ChildPath "WinLTSC_WorkDir"
+$tempDir = Join-Path -Path $workDir -ChildPath "Temp"
+$outputDir = Join-Path -Path $workDir -ChildPath "Output"
+New-Item -ItemType Directory -Path $tempDir, $outputDir -Force | Out-Null
+$targetWimPath = Join-Path -Path $outputDir -ChildPath $targetWimName
+$targetEsdPath = Join-Path -Path $outputDir -ChildPath $targetEsdName
 
-jobs:
-  build_with_error_fixes:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: powershell
-        working-directory: ${{ github.workspace }}
-    steps:
-      # Step 1: Initialize Env (Fix encoding + 7z path + ASCII only)
-      - name: 1. Initialize Environment (Encoding/7z/ASCII Fix)
-        run: |
-          # Fix non-ASCII encoding issue (force UTF-8)
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-          $ConsoleOutputEncoding = [System.Text.Encoding]::UTF8
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+# 1. 下载文件（原生curl，显示进度/速度）
+function Download-File {
+    param(
+        [string]$Url,
+        [string]$OutputPath
+    )
+    try {
+        Write-Host "`nDownloading: $Url" -ForegroundColor Cyan
+        & curl.exe -L -o $OutputPath -# $Url  # -# 显示进度条，原生curl确保速度/进度展示
+        if ($LASTEXITCODE -ne 0) { throw "Download failed (exit code: $LASTEXITCODE)" }
+        Write-Host "Download completed: $OutputPath" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "Error downloading $Url : $_" -ForegroundColor Red
+        exit 1
+    }
+}
 
-          Write-Host "=== Initializing Build Environment ==="
-          
-          # Create working dir (absolute path, ASCII only)
-          New-Item -Path $env:WORK_DIR -ItemType Directory -Force | Out-Null
-          New-Item -Path "$env:WORK_DIR\temp" -ItemType Directory -Force | Out-Null
-          
-          # Validate path length (avoid MAX_PATH truncation)
-          $workDirLength = $env:WORK_DIR.Length
-          if ($workDirLength -ge 200) {
-            Write-Error "Working directory path too long ($workDirLength chars) - may cause string termination errors! Path: $env:WORK_DIR"
-            exit 1
-          }
+# 2. 解压7z分卷（自动识别分卷，规避路径语法错误）
+function Extract-7zVolumes {
+    param(
+        [array]$7zFiles,
+        [string]$ExtractDir
+    )
+    try {
+        New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
+        Write-Host "`nExtracting 7z volumes to: $ExtractDir" -ForegroundColor Cyan
+        $first7z = $7zFiles | Sort-Object | Select-Object -First 1  # 7z只需指定第一个分卷即可解压全部
+        & 7z.exe x -y -o"$ExtractDir" "$first7z"  # -y 自动确认，-o指定输出目录（规避路径语法坑）
+        if ($LASTEXITCODE -ne 0) { throw "7z extraction failed (exit code: $LASTEXITCODE)" }
+        Write-Host "7z extraction completed" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "Error extracting 7z: $_" -ForegroundColor Red
+        exit 1
+    }
+}
 
-          # Validate 7z path (fix 7z syntax error)
-          if (-not (Test-Path $env:SEVEN_ZIP_PATH)) {
-            Write-Error "7-Zip not found at expected path: $env:SEVEN_ZIP_PATH. Please install 7-Zip first."
-            exit 1
-          }
+# 3. 从ISO提取install.esd
+function Extract-InstallEsdFromIso {
+    param(
+        [string]$IsoPath,
+        [string]$OutputDir
+    )
+    try {
+        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+        Write-Host "`nMounting ISO: $IsoPath" -ForegroundColor Cyan
+        $mount = Mount-DiskImage -ImagePath $IsoPath -PassThru
+        $drive = ($mount | Get-Volume | Get-Partition).DriveLetter + ":"
+        $esdSource = Join-Path -Path $drive -ChildPath "sources\install.esd"
+        $esdOutput = Join-Path -Path $OutputDir -ChildPath "install.esd"
+        
+        Copy-Item -Path $esdSource -Destination $esdOutput -Force
+        if (-not (Test-Path $esdOutput)) { throw "install.esd not found in ISO" }
+        
+        Dismount-DiskImage -ImagePath $IsoPath -Confirm:$false
+        Write-Host "Extracted install.esd: $esdOutput" -ForegroundColor Green
+        return $esdOutput
+    }
+    catch {
+        if ($mount) { Dismount-DiskImage -ImagePath $IsoPath -Confirm:$false -ErrorAction SilentlyContinue }
+        Write-Host "Error extracting ESD: $_" -ForegroundColor Red
+        exit 1
+    }
+}
 
-          # Validate core tools (ASCII-only checks)
-          $requiredTools = @(
-            @{Name="7z"; Path=$env:SEVEN_ZIP_PATH},
-            @{Name="curl"; Path="curl.exe"},
-            @{Name="dism"; Path="dism.exe"}
-          )
-          foreach ($tool in $requiredTools) {
-            if (-not (Get-Command $tool.Path -ErrorAction SilentlyContinue)) {
-              Write-Error "$($tool.Name) tool not found at path: $($tool.Path) - aborting build."
-              exit 1
+# 4. 合并映像到WIM（首次创建，后续追加）
+function Add-ImageToWim {
+    param(
+        [string]$EsdPath,
+        [string]$TargetWimPath,
+        [bool]$IsFirstImage
+    )
+    try {
+        Write-Host "`nProcessing image from ESD: $EsdPath" -ForegroundColor Cyan
+        # 验证ESD包含索引1的映像
+        & dism.exe /Get-ImageInfo /ImageFile:"$EsdPath" | Select-String "Image Index: 1" -ErrorAction Stop
+        
+        # 合并映像（首次创建，后续追加）
+        if ($IsFirstImage) {
+            & dism.exe /Export-Image /SourceImageFile:"$EsdPath" /SourceIndex:1 /DestinationImageFile:"$TargetWimPath" /Compress:max /CheckIntegrity
+        }
+        else {
+            & dism.exe /Export-Image /SourceImageFile:"$EsdPath" /SourceIndex:1 /DestinationImageFile:"$TargetWimPath" /Compress:max /CheckIntegrity /Append
+        }
+        
+        if ($LASTEXITCODE -ne 0) { throw "DISM merge failed (exit code: $LASTEXITCODE)" }
+        Write-Host "Image merged to WIM successfully" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "Error merging image: $_" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# 5. 清理临时文件（逐源清理，节省空间）
+function Cleanup-TempFiles {
+    param(
+        [array]$FilesToDelete
+    )
+    try {
+        Write-Host "`nCleaning temporary files..." -ForegroundColor Cyan
+        foreach ($file in $FilesToDelete) {
+            if (Test-Path $file) {
+                Remove-Item -Path $file -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host "Deleted: $file" -ForegroundColor Yellow
             }
-          }
+        }
+    }
+    catch { Write-Host "Warning: Cleanup error - $_" -ForegroundColor Yellow }
+}
 
-          Write-Host "✅ Environment initialized successfully (UTF-8 encoding, 7z path validated, ASCII-only paths)."
+# 6. 转换WIM到高压缩ESD
+function Convert-WimToEsd {
+    param(
+        [string]$WimPath,
+        [string]$EsdPath
+    )
+    try {
+        Write-Host "`nConverting WIM to ESD (high compression)..." -ForegroundColor Cyan
+        # 获取WIM中的映像数量
+        $imageCount = (& dism.exe /Get-ImageInfo /ImageFile:"$WimPath" | Select-String "Image Index: (\d+)").Count
+        
+        # 转换第一个映像（创建ESD）
+        & dism.exe /Export-Image /SourceImageFile:"$WimPath" /SourceIndex:1 /DestinationImageFile:"$EsdPath" /Compress:recovery /CheckIntegrity
+        
+        # 追加剩余映像
+        for ($i=2; $i -le $imageCount; $i++) {
+            & dism.exe /Export-Image /SourceImageFile:"$WimPath" /SourceIndex:$i /DestinationImageFile:"$EsdPath" /Compress:recovery /CheckIntegrity /Append
+        }
+        
+        if ($LASTEXITCODE -ne 0) { throw "ESD conversion failed (exit code: $LASTEXITCODE)" }
+        Write-Host "WIM converted to ESD successfully" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "Error converting ESD: $_" -ForegroundColor Red
+        exit 1
+    }
+}
 
-      # Step 2: Process Win10 x86 LTSC2021 (Fix 7z path syntax)
-      - name: 2. Process Win10 x86 LTSC2021
-        run: |
-          Write-Host "=== Processing Win10 x86 LTSC2021 ==="
-          Set-Location $env:WORK_DIR
+# 7. 1950M分卷压缩
+function Split-FileToVolumes {
+    param(
+        [string]$SourceFile,
+        [string]$OutputPrefix,
+        [string]$VolumeSize
+    )
+    try {
+        Write-Host "`nSplitting file to $VolumeSize volumes..." -ForegroundColor Cyan
+        & 7z.exe a -t7z -mx=9 -v$VolumeSize -y "$OutputPrefix.7z" "$SourceFile"  # -mx=9最高压缩，-v指定分卷大小
+        if ($LASTEXITCODE -ne 0) { throw "7z split failed (exit code: $LASTEXITCODE)" }
+        $splitFiles = Get-ChildItem -Path "$OutputPrefix.7z.*"
+        Write-Host "Split completed: $($splitFiles.Count) volumes created" -ForegroundColor Green
+        return $splitFiles.FullName
+    }
+    catch {
+        Write-Host "Error splitting file: $_" -ForegroundColor Red
+        exit 1
+    }
+}
 
-          # Download 7z volumes (ASCII-only URLs, absolute path output)
-          Write-Host "Downloading Win10 x86 7z volumes..."
-          $outputPathX86Vol1 = Join-Path -Path $env:WORK_DIR -ChildPath (Split-Path $env:WIN10_X86_VOL1 -Leaf)
-          $outputPathX86Vol2 = Join-Path -Path $env:WORK_DIR -ChildPath (Split-Path $env:WIN10_X86_VOL2 -Leaf)
-          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -o "$outputPathX86Vol1" $env:WIN10_X86_VOL1
-          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -o "$outputPathX86Vol2" $env:WIN10_X86_VOL2
+# 8. 发布到GitHub Releases（仅发布最终分卷）
+function Publish-GitHubRelease {
+    param(
+        [string]$ReleaseName,
+        [string]$Tag,
+        [array]$FilesToUpload,
+        [int]$RetentionDays
+    )
+    try {
+        Write-Host "`nPublishing to GitHub Releases..." -ForegroundColor Cyan
+        # 验证环境变量
+        if (-not $env:GITHUB_TOKEN) { throw "GITHUB_TOKEN not set" }
+        if (-not $env:GITHUB_REPOSITORY) { throw "GITHUB_REPOSITORY not set (e.g., owner/repo)" }
+        
+        # 构建请求头
+        $headers = @{
+            "Authorization" = "token $($env:GITHUB_TOKEN)"
+            "Accept" = "application/vnd.github.v3+json"
+        }
 
-          # Validate download (ASCII-only path check)
-          if (-not (Test-Path "$outputPathX86Vol1")) {
-            Write-Error "Win10 x86 7z volume 1 download failed! Path: $outputPathX86Vol1"
-            exit 1
-          }
+        # 创建Release
+        $releaseBody = "Merged Win10 LTSC2021 (x86/x64) + Win11 LTSC2024 (x64) ESD, split into $splitSize volumes`nArtifact retention: $RetentionDays days"
+        $releaseData = @{
+            tag_name = $Tag
+            name = $ReleaseName
+            body = $releaseBody
+            draft = $false
+            prerelease = $false
+        } | ConvertTo-Json
+        
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$($env:GITHUB_REPOSITORY)/releases" -Method Post -Headers $headers -Body $releaseData -ContentType "application/json"
+        $uploadUrl = $release.upload_url -replace '\{.*\}', ''
 
-          # Extract 7z (FIX: absolute path + quoted path for 7z syntax)
-          Write-Host "Extracting Win10 x86 7z volumes..."
-          $extractDir = Join-Path -Path $env:WORK_DIR -ChildPath "temp"
-          & $env:SEVEN_ZIP_PATH x -y "$outputPathX86Vol1" -o"$extractDir" | Out-Null
+        # 上传分卷文件（仅上传最终成果）
+        foreach ($file in $FilesToUpload) {
+            $fileName = [System.IO.Path]::GetFileName($file)
+            Write-Host "Uploading: $fileName" -ForegroundColor Cyan
+            $fileBytes = [System.IO.File]::ReadAllBytes($file)
+            Invoke-RestMethod -Uri "$uploadUrl?name=$fileName" -Method Post -Headers $headers -Body $fileBytes -ContentType "application/octet-stream"
+            Write-Host "Uploaded: $fileName" -ForegroundColor Green
+        }
 
-          # Find ISO (absolute path, ASCII-only)
-          Write-Host "Extracting install.esd from ISO..."
-          $isoFile = Get-ChildItem -Path $extractDir -Filter *.iso -Recurse -File | Select-Object -First 1
-          if (-not $isoFile) {
-            Write-Error "ISO file not found in extracted Win10 x86 7z archive! Extract dir: $extractDir"
-            exit 1
-          }
-          $isoAbsolutePath = Resolve-Path -Path $isoFile.FullName | Select-Object -ExpandProperty Path
+        # 提示Artifact保留期配置（GitHub Actions需配合workflow设置）
+        Write-Host "`nNote: Set artifact retention to $RetentionDays days in GitHub Actions workflow" -ForegroundColor Yellow
+        Write-Host "Release published: $($release.html_url)" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "Error publishing release: $_" -ForegroundColor Red
+        exit 1
+    }
+}
 
-          # Extract install.esd (FIX: 7z absolute path + quoted syntax)
-          $esdExtractDir = Join-Path -Path $extractDir -ChildPath "esd"
-          & $env:SEVEN_ZIP_PATH x -y "$isoAbsolutePath" -o"$esdExtractDir" "sources/install.esd" | Out-Null
-          $esdPath = Join-Path -Path $esdExtractDir -ChildPath "sources/install.esd"
+# ====================== 主执行流程 ======================
+$isFirstImage = $true  # 标记是否为第一个要合并的映像
+foreach ($source in $downloadSources) {
+    Write-Host "`n==================================================" -ForegroundColor Magenta
+    Write-Host "Processing: $($source.Name)" -ForegroundColor Magenta
+    Write-Host "==================================================" -ForegroundColor Magenta
 
-          # Validate ESD (ASCII-only path)
-          if (-not (Test-Path "$esdPath")) {
-            Write-Error "install.esd not found in Win10 x86 ISO! Path: $esdPath"
-            exit 1
-          }
+    # 1. 下载7z分卷
+    $7zFiles = @()
+    foreach ($url in $source.Urls) {
+        $fileName = [System.IO.Path]::GetFileName($url)
+        $outputPath = Join-Path -Path $tempDir -ChildPath $fileName
+        Download-File -Url $url -OutputPath $outputPath
+        $7zFiles += $outputPath
+    }
 
-          # Export to WIM (absolute path, ASCII-only)
-          Write-Host "Exporting Win10 x86 to WIM..."
-          $wimPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:TARGET_WIM
-          dism /export-image /sourceimagefile:"$esdPath" /sourceindex:1 /destinationimagefile:"$wimPath" /compress:max /checkintegrity
+    # 2. 解压7z分卷
+    $7zExtractDir = Join-Path -Path $tempDir -ChildPath "$($source.Name)_7zExtract"
+    Extract-7zVolumes -7zFiles $7zFiles -ExtractDir $7zExtractDir
 
-          # Validate WIM (ASCII-only path)
-          if (-not (Test-Path "$wimPath")) {
-            Write-Error "Win10 x86 WIM export failed! Path: $wimPath"
-            exit 1
-          }
-          Write-Host "✅ Win10 x86 WIM generated successfully. Path: $wimPath"
+    # 3. 找到ISO文件
+    $isoFile = Get-ChildItem -Path $7zExtractDir -Filter "*.iso" -Recurse | Select-Object -First 1
+    if (-not $isoFile) { throw "No ISO found in $7zExtractDir" }
+    $isoPath = $isoFile.FullName
 
-          # Cleanup (ASCII-only paths)
-          Write-Host "Cleaning up temporary files..."
-          Remove-Item -Path "$outputPathX86Vol1", "$outputPathX86Vol2" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -Path $extractDir -ItemType Directory -Force | Out-Null
+    # 4. 提取install.esd
+    $esdExtractDir = Join-Path -Path $tempDir -ChildPath "$($source.Name)_EsdExtract"
+    $esdPath = Extract-InstallEsdFromIso -IsoPath $isoPath -OutputDir $esdExtractDir
 
-      # Incremental Backup v1 (Win10 x86 WIM)
-      - name: 🔥 Incremental Backup v1 (Win10 x86 WIM Only)
-        uses: actions/upload-artifact@v4
-        with:
-          name: WIM_Backup_v1_Win10_x86
-          path: ${{ env.WORK_DIR }}\${{ env.TARGET_WIM }}
-          retention-days: ${{ env.RETENTION_DAYS }}
-        if: always()
+    # 5. 合并映像到WIM
+    Add-ImageToWim -EsdPath $esdPath -TargetWimPath $targetWimPath -IsFirstImage $isFirstImage
+    $isFirstImage = $false
 
-      # Step 3: Process Win10 x64 LTSC2021 (Fix 7z path syntax)
-      - name: 3. Process Win10 x64 LTSC2021
-        run: |
-          Write-Host "=== Processing Win10 x64 LTSC2021 ==="
-          Set-Location $env:WORK_DIR
+    # 6. 逐源清理临时文件（7z/ISO/ESD）
+    $tempFiles = $7zFiles + $isoPath + $esdPath + $7zExtractDir + $esdExtractDir
+    Cleanup-TempFiles -FilesToDelete $tempFiles
+}
 
-          # Download 7z volumes (absolute output paths)
-          Write-Host "Downloading Win10 x64 7z volumes..."
-          $outputPathX64Vol1 = Join-Path -Path $env:WORK_DIR -ChildPath (Split-Path $env:WIN10_X64_VOL1 -Leaf)
-          $outputPathX64Vol2 = Join-Path -Path $env:WORK_DIR -ChildPath (Split-Path $env:WIN10_X64_VOL2 -Leaf)
-          $outputPathX64Vol3 = Join-Path -Path $env:WORK_DIR -ChildPath (Split-Path $env:WIN10_X64_VOL3 -Leaf)
-          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -o "$outputPathX64Vol1" $env:WIN10_X64_VOL1
-          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -o "$outputPathX64Vol2" $env:WIN10_X64_VOL2
-          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -o "$outputPathX64Vol3" $env:WIN10_X64_VOL3
+# 转换WIM到ESD
+Convert-WimToEsd -WimPath $targetWimPath -EsdPath $targetEsdPath
+Cleanup-TempFiles -FilesToDelete @($targetWimPath)  # 清理WIM，仅保留ESD
 
-          # Validate download
-          if (-not (Test-Path "$outputPathX64Vol1")) {
-            Write-Error "Win10 x64 7z volume 1 download failed! Path: $outputPathX64Vol1"
-            exit 1
-          }
+# 分卷压缩ESD
+$splitPrefix = Join-Path -Path $outputDir -ChildPath $releaseName
+$splitFiles = Split-FileToVolumes -SourceFile $targetEsdPath -OutputPrefix $splitPrefix -VolumeSize $splitSize
 
-          # Extract 7z (FIX: absolute path + quoted syntax for 7z)
-          Write-Host "Extracting Win10 x64 7z volumes..."
-          $extractDir = Join-Path -Path $env:WORK_DIR -ChildPath "temp"
-          & $env:SEVEN_ZIP_PATH x -y "$outputPathX64Vol1" -o"$extractDir" | Out-Null
+# 发布到GitHub Releases
+Publish-GitHubRelease -ReleaseName $releaseName -Tag $releaseName -FilesToUpload $splitFiles -RetentionDays $artifactRetentionDays
 
-          # Find ISO (absolute path)
-          $isoFile = Get-ChildItem -Path $extractDir -Filter *.iso -Recurse -File | Select-Object -First 1
-          if (-not $isoFile) {
-            Write-Error "ISO file not found in extracted Win10 x64 7z archive! Extract dir: $extractDir"
-            exit 1
-          }
-          $isoAbsolutePath = Resolve-Path -Path $isoFile.FullName | Select-Object -ExpandProperty Path
-
-          # Extract install.esd (FIX: 7z absolute path)
-          $esdExtractDir = Join-Path -Path $extractDir -ChildPath "esd"
-          & $env:SEVEN_ZIP_PATH x -y "$isoAbsolutePath" -o"$esdExtractDir" "sources/install.esd" | Out-Null
-          $esdPath = Join-Path -Path $esdExtractDir -ChildPath "sources/install.esd"
-
-          # Validate ESD
-          if (-not (Test-Path "$esdPath")) {
-            Write-Error "install.esd not found in Win10 x64 ISO! Path: $esdPath"
-            exit 1
-          }
-
-          # Append to WIM (absolute path)
-          Write-Host "Appending Win10 x64 to existing WIM..."
-          $wimPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:TARGET_WIM
-          dism /export-image /sourceimagefile:"$esdPath" /sourceindex:1 /destinationimagefile:"$wimPath" /compress:max /checkintegrity
-
-          Write-Host "✅ Win10 x64 appended to WIM successfully. Path: $wimPath"
-
-          # Cleanup
-          Write-Host "Cleaning up temporary files..."
-          Remove-Item -Path "$outputPathX64Vol1", "$outputPathX64Vol2", "$outputPathX64Vol3" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -Path $extractDir -ItemType Directory -Force | Out-Null
-
-      # Incremental Backup v2 (Win10 x86+x64 WIM)
-      - name: 🔥 Incremental Backup v2 (Win10 x86+x64 WIM)
-        uses: actions/upload-artifact@v4
-        with:
-          name: WIM_Backup_v2_Win10_x86_x64
-          path: ${{ env.WORK_DIR }}\${{ env.TARGET_WIM }}
-          retention-days: ${{ env.RETENTION_DAYS }}
-        if: always()
-
-      # Step 4: Process Win11 x64 LTSC2024 (Fix 7z path syntax)
-      - name: 4. Process Win11 x64 LTSC2024
-        run: |
-          Write-Host "=== Processing Win11 x64 LTSC2024 ==="
-          Set-Location $env:WORK_DIR
-
-          # Download 7z volumes (absolute output paths)
-          Write-Host "Downloading Win11 x64 7z volumes..."
-          $outputPathWin11Vol1 = Join-Path -Path $env:WORK_DIR -ChildPath (Split-Path $env:WIN11_X64_VOL1 -Leaf)
-          $outputPathWin11Vol2 = Join-Path -Path $env:WORK_DIR -ChildPath (Split-Path $env:WIN11_X64_VOL2 -Leaf)
-          $outputPathWin11Vol3 = Join-Path -Path $env:WORK_DIR -ChildPath (Split-Path $env:WIN11_X64_VOL3 -Leaf)
-          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -o "$outputPathWin11Vol1" $env:WIN11_X64_VOL1
-          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -o "$outputPathWin11Vol2" $env:WIN11_X64_VOL2
-          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -o "$outputPathWin11Vol3" $env:WIN11_X64_VOL3
-
-          # Validate download
-          if (-not (Test-Path "$outputPathWin11Vol1")) {
-            Write-Error "Win11 x64 7z volume 1 download failed! Path: $outputPathWin11Vol1"
-            exit 1
-          }
-
-          # Extract 7z (FIX: absolute path + quoted syntax)
-          Write-Host "Extracting Win11 x64 7z volumes..."
-          $extractDir = Join-Path -Path $env:WORK_DIR -ChildPath "temp"
-          & $env:SEVEN_ZIP_PATH x -y "$outputPathWin11Vol1" -o"$extractDir" | Out-Null
-
-          # Find ISO (absolute path)
-          $isoFile = Get-ChildItem -Path $extractDir -Filter *.iso -Recurse -File | Select-Object -First 1
-          if (-not $isoFile) {
-            Write-Error "ISO file not found in extracted Win11 x64 7z archive! Extract dir: $extractDir"
-            exit 1
-          }
-          $isoAbsolutePath = Resolve-Path -Path $isoFile.FullName | Select-Object -ExpandProperty Path
-
-          # Extract install.esd (FIX: 7z absolute path)
-          $esdExtractDir = Join-Path -Path $extractDir -ChildPath "esd"
-          & $env:SEVEN_ZIP_PATH x -y "$isoAbsolutePath" -o"$esdExtractDir" "sources/install.esd" | Out-Null
-          $esdPath = Join-Path -Path $esdExtractDir -ChildPath "sources/install.esd"
-
-          # Validate ESD
-          if (-not (Test-Path "$esdPath")) {
-            Write-Error "install.esd not found in Win11 x64 ISO! Path: $esdPath"
-            exit 1
-          }
-
-          # Append to WIM (absolute path)
-          Write-Host "Appending Win11 x64 to existing WIM..."
-          $wimPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:TARGET_WIM
-          dism /export-image /sourceimagefile:"$esdPath" /sourceindex:1 /destinationimagefile:"$wimPath" /compress:max /checkintegrity
-
-          # Validate final WIM
-          if (-not (Test-Path "$wimPath")) {
-            Write-Error "Final WIM generation failed! Path: $wimPath"
-            exit 1
-          }
-          Write-Host "✅ Final full WIM generated successfully. Path: $wimPath | Size: $(Get-Item "$wimPath").Length bytes"
-
-          # Cleanup
-          Write-Host "Cleaning up temporary files..."
-          Remove-Item -Path "$outputPathWin11Vol1", "$outputPathWin11Vol2", "$outputPathWin11Vol3" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-
-      # Incremental Backup v3 (Final Full WIM)
-      - name: 🔥 Incremental Backup v3 (Final Full WIM)
-        uses: actions/upload-artifact@v4
-        with:
-          name: WIM_Backup_v3_Final_Full
-          path: ${{ env.WORK_DIR }}\${{ env.TARGET_WIM }}
-          retention-days: ${{ env.RETENTION_DAYS }}
-        if: always()
-
-      # Step 5: Convert WIM to ESD (Fix DISM error 87 + ASCII path)
-      - name: 5. Convert WIM to High-Compression ESD
-        run: |
-          Write-Host "=== Converting WIM to ESD (Recovery Compression) ==="
-          Set-Location $env:WORK_DIR
-
-          # Validate WIM (absolute path, ASCII-only)
-          $wimPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:TARGET_WIM
-          if (-not (Test-Path "$wimPath")) {
-            Write-Error "Source WIM file not found! Path: $wimPath"
-            exit 1
-          }
-
-          # Check WIM integrity (ASCII-only command)
-          Write-Host "Checking WIM image integrity..."
-          dism /get-imageinfo /imagefile:"$wimPath"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Source WIM file is corrupted! DISM exit code: $LASTEXITCODE"
-            exit 1
-          }
-
-          # Convert to ESD (FIX: /format:esd + absolute path + ASCII-only)
-          Write-Host "Starting ESD conversion..."
-          $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:TARGET_ESD
-          dism /export-image /sourceimagefile:"$wimPath" /sourceindex:all /destinationimagefile:"$esdPath" /compress:recovery /checkintegrity /format:esd
-
-          # Validate ESD
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "ESD conversion failed! DISM exit code: $LASTEXITCODE"
-            exit 1
-          }
-          if (-not (Test-Path "$esdPath")) {
-            Write-Error "ESD file not generated after conversion! Path: $esdPath"
-            exit 1
-          }
-          Write-Host "✅ ESD conversion completed successfully. Path: $esdPath | Size: $(Get-Item "$esdPath").Length bytes"
-
-      # Backup ESD
-      - name: 🔥 Backup ESD File
-        uses: actions/upload-artifact@v4
-        with:
-          name: ESD_Backup_Final
-          path: ${{ env.WORK_DIR }}\${{ env.TARGET_ESD }}
-          retention-days: ${{ env.RETENTION_DAYS }}
-        if: always()
-
-      # Step 6: Split ESD to 1950M Volumes (Fix 7z path syntax)
-      - name: 6. Split ESD to 1950M Volumes
-        run: |
-          Write-Host "=== Splitting ESD to $env:SPLIT_SIZE Volumes ==="
-          Set-Location $env:WORK_DIR
-
-          # Validate ESD (absolute path)
-          $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:TARGET_ESD
-          if (-not (Test-Path "$esdPath")) {
-            Write-Error "Source ESD file not found! Path: $esdPath"
-            exit 1
-          }
-
-          # Split ESD (FIX: 7z absolute path + quoted path + ASCII-only)
-          $splitOutputPath = Join-Path -Path $env:WORK_DIR -ChildPath "$env:TARGET_ESD.7z"
-          & $env:SEVEN_ZIP_PATH a -t7z -mx=9 -v$env:SPLIT_SIZE "$splitOutputPath" "$esdPath" | Out-Null
-
-          # Validate split volumes
-          $splitVol1Path = Join-Path -Path $env:WORK_DIR -ChildPath "$env:TARGET_ESD.7z.001"
-          if (-not (Test-Path "$splitVol1Path")) {
-            Write-Error "ESD volume splitting failed! Volume 1 path: $splitVol1Path"
-            exit 1
-          }
-          $splitFileCount = (Get-ChildItem -Path "$env:WORK_DIR\$env:TARGET_ESD.7z.*" | Measure-Object).Count
-          Write-Host "✅ ESD split completed successfully. Number of volumes: $splitFileCount"
-
-      # Backup Split Volumes
-      - name: 🔥 Backup Split Volumes
-        uses: actions/upload-artifact@v4
-        with:
-          name: Split_Volumes_Backup_Final
-          path: ${{ env.WORK_DIR }}\${{ env.TARGET_ESD }}.7z.*
-          retention-days: ${{ env.RETENTION_DAYS }}
-        if: always()
-
-      # Step 7: Release to GitHub Releases (ASCII-only paths)
-      - name: 7. Release to GitHub Releases
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: ${{ env.RELEASE_TAG }}
-          files: ${{ env.WORK_DIR }}\${{ env.TARGET_ESD }}.7z.*
-          overwrite: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        if: success()
+# 最终提示
+Write-Host "`n==================================================" -ForegroundColor Green
+Write-Host "All tasks completed successfully!" -ForegroundColor Green
+Write-Host "Final files: $($splitFiles -join '; ')" -ForegroundColor Green
+Write-Host "==================================================" -ForegroundColor Green
