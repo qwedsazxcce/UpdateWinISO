@@ -2,12 +2,18 @@ name: Windows_10-11_ESD
 
 on:
   workflow_dispatch:
+    inputs:
+      skip_download_extract:
+        description: '是否跳过下载和解压步骤（true=跳过，false=不跳过）'
+        required: true
+        default: 'false'
+        type: boolean
   schedule:
-    # Schedule run (optional)
+    # 每月1号运行（可选）
     - cron: '0 0 1 * *'
 
 env:
-  # Download URL environment variables - for easy replacement later
+  # 下载地址（可根据需要替换）
   WIN10_X86_URL_1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
   WIN10_X86_URL_2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
   
@@ -19,14 +25,17 @@ env:
   WIN11_X64_URL_2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
   WIN11_X64_URL_3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
   
+  # 输出文件名
   OUTPUT_WIM_NAME: Windows10_LTSC_2021_32_and_64_Windows_11_LTSC_2025.wim
   OUTPUT_ESD_NAME: Windows10_LTSC_2021_32_and_64_Windows_11_LTSC_2025.esd
+  # 分卷大小
   PART_SIZE: 1950M
 
 jobs:
   merge-images:
     runs-on: windows-latest
-    timeout-minutes: 180  # 新增：防止大文件处理超时
+    # 延长超时时间（大文件处理需要）
+    timeout-minutes: 180
     
     steps:
     - name: Checkout repository
@@ -34,594 +43,563 @@ jobs:
 
     - name: Setup 7-Zip
       run: |
-        # 7-Zip should be available on GitHub Actions Windows runners
         Write-Output "Checking for 7-Zip..."
         if (Get-Command 7z -ErrorAction SilentlyContinue) {
           Write-Output "7-Zip found"
           & 7z
         } else {
           Write-Output "Installing 7-Zip..."
-          choco install 7zip
+          choco install 7zip -y
         }
 
     - name: Setup DISM tools
       run: |
-        Write-Output "DISM tools should be available on Windows runners"
-        dism /?
+        Write-Output "Verifying DISM availability..."
+        dism /? | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+          Write-Output "DISM tools are available"
+        } else {
+          throw "DISM tools not found on the runner"
+        }
         
     - name: Create working directory
       run: |
         New-Item -ItemType Directory -Force -Path "$env:TEMP\merge_process"
         Set-Location "$env:TEMP\merge_process"
-        Write-Output "Working directory: $(Get-Location)"
+        Write-Output "Working directory created: $(Get-Location)"
 
-    # Process Win10 x86 LTSC 2021
+    # ===================== Win10 x86 LTSC 2021 处理 =====================
     - name: Download Win10 x86 7z parts
+      if: github.event.inputs.skip_download_extract == false
       run: |
         Set-Location "$env:TEMP\merge_process"
         
         Write-Output "Downloading Win10 x86 7z parts..."
         
-        # Download first part
+        # 检查缓存文件是否存在（避免重复下载）
+        $file1 = "Windows10_LTSC2021_x86-19044.6811.7z.001"
+        $file2 = "Windows10_LTSC2021_x86-19044.6811.7z.002"
+        if (Test-Path $file1 -and Test-Path $file2) {
+            Write-Output "Win10 x86 7z files already exist, skipping download"
+            exit 0
+        }
+        
+        # 下载第一部分
         Write-Output "Downloading part 1..."
-        curl -L -o "Windows10_LTSC2021_x86-19044.6811.7z.001" "$env:WIN10_X86_URL_1"
-        
-        # Check if download succeeded
+        curl -L -o $file1 "$env:WIN10_X86_URL_1"
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed to download first part of x86 ISO with exit code: $LASTEXITCODE"
+            throw "Failed to download Win10 x86 part 1 (exit code: $LASTEXITCODE)"
         }
         
-        # Download second part
+        # 下载第二部分
         Write-Output "Downloading part 2..."
-        curl -L -o "Windows10_LTSC2021_x86-19044.6811.7z.002" "$env:WIN10_X86_URL_2"
-        
-        # Check if download succeeded
+        curl -L -o $file2 "$env:WIN10_X86_URL_2"
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed to download second part of x86 ISO with exit code: $LASTEXITCODE"
+            throw "Failed to download Win10 x86 part 2 (exit code: $LASTEXITCODE)"
         }
         
-        Write-Output "Download completed for Win10 x86"
+        Write-Output "Win10 x86 download completed successfully"
 
     - name: Extract Win10 x86 ISO and process
+      if: github.event.inputs.skip_download_extract == false
       run: |
         Set-Location "$env:TEMP\merge_process"
         
         Write-Output "Extracting Win10 x86 archive..."
-        & 7z x "Windows10_LTSC2021_x86-19044.6811.7z.001" -o"x86_extract" -y  # 新增：-y 自动覆盖
-        
-        # Check if 7z extraction succeeded
+        & 7z x "Windows10_LTSC2021_x86-19044.6811.7z.001" -o"x86_extract" -y
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed to extract x86 ISO with 7z exit code: $LASTEXITCODE"
+            throw "Failed to extract Win10 x86 archive (exit code: $LASTEXITCODE)"
         }
         
-        # Find the ISO file
-        $isoFile = Get-ChildItem -Path "x86_extract" -Filter "*.iso" | Select-Object -First 1
+        # 查找ISO文件
+        $isoFile = Get-ChildItem -Path "x86_extract" -Filter "*.iso" -Recurse | Select-Object -First 1
         if ($null -eq $isoFile) {
-            throw "ISO file not found in x86 extraction"
+            throw "No ISO file found in Win10 x86 extract directory"
         }
+        Write-Output "Found Win10 x86 ISO: $($isoFile.FullName)"
         
-        Write-Output "Found ISO: $($isoFile.FullName)"
-        
-        # Mount ISO to extract install.esd with try/finally to ensure unmount
+        # 挂载ISO并提取install.esd
         $mountResult = $null
         try {
-            $mountResult = Mount-DiskImage -ImagePath $isoFile.FullName -PassThru
-            
-            # Check if mount was successful
-            if ($null -eq $mountResult) {
-                throw "Failed to mount ISO file: $($isoFile.FullName)"
-            }
-            
-            # Get drive letter and check it exists
+            $mountResult = Mount-DiskImage -ImagePath $isoFile.FullName -PassThru -ErrorAction Stop
             $driveLetter = ($mountResult | Get-Volume).DriveLetter
             
             if ([string]::IsNullOrEmpty($driveLetter)) {
-                Write-Output "Drive letter is null or empty, trying alternative method..."
-                # Improved way to get drive letter based on the mounted image
-                $driveLetter = (Get-DiskImage -ImagePath $isoFile.FullName | Get-Volume).DriveLetter
-                
-                if ([string]::IsNullOrEmpty($driveLetter)) {
-                    # Last resort: try the original method
-                    $volumeInfo = Get-Volume | Where-Object { $_.FileSystemLabel -like "*Windows*" -or $_.FileSystemLabel -like "*DVD*" -or $_.FileSystemLabel -like "*ISO*" }
-                    if ($volumeInfo -and $volumeInfo.DriveLetter) {
-                        $driveLetter = $volumeInfo.DriveLetter
-                    }
-                }
+                throw "Failed to get drive letter for mounted ISO"
             }
+            Write-Output "ISO mounted to drive ${driveLetter}:"
             
-            if ([string]::IsNullOrEmpty($driveLetter)) {
-                throw "Could not determine drive letter for mounted ISO: $($isoFile.FullName)"
-            }
-            
-            Write-Output "ISO mounted successfully on drive ${driveLetter}:"
-            
-            # Copy sources\install.esd to working directory
+            # 复制install.esd
             $sourceEsd = "${driveLetter}:\sources\install.esd"
-            if (Test-Path $sourceEsd) {
-                Write-Output "Copying install.esd from ISO..."
-                Copy-Item $sourceEsd -Destination "x86_install.esd"
-                
-                # Create WIM from x86 install.esd as the base image
-                Write-Output "Creating base WIM from x86 install.esd..."
-                $dismLog = "$env:TEMP\x86_dism_export.log"
-                dism /Export-Image /SourceImageFile:"x86_install.esd" /SourceIndex:1 /DestinationImageFile:"$env:OUTPUT_WIM_NAME" /Compress:max /CheckIntegrity /LogPath:$dismLog
-                
-                # Check if DISM command succeeded
-                if ($LASTEXITCODE -ne 0) {
-                    $logContent = if (Test-Path $dismLog) { Get-Content $dismLog -Raw } else { "Log file not found" }
-                    Write-Output "DISM Log Content: $logContent"
-                    throw "Failed to create WIM from x86 install.esd with exit code: $LASTEXITCODE"
-                }
-                
-                # Output DISM log content for debugging
-                if (Test-Path $dismLog) {
-                    $logContent = Get-Content $dismLog -Raw
-                    Write-Output "DISM Export Log: $logContent"
-                }
-                
-                Write-Output "Base WIM file created: $(Test-Path "$env:OUTPUT_WIM_NAME")"
-                if (Test-Path "$env:OUTPUT_WIM_NAME") {
-                    Write-Output "Base WIM file size: $((Get-Item "$env:OUTPUT_WIM_NAME").Length) bytes"
-                }
-                
-                Write-Output "Successfully created base WIM file from x86 install.esd"
-            } else {
-                throw "install.esd not found in ISO sources folder at path: $sourceEsd"
+            if (-not (Test-Path $sourceEsd)) {
+                throw "install.esd not found at $sourceEsd"
             }
+            Write-Output "Copying install.esd from ISO..."
+            Copy-Item $sourceEsd -Destination "x86_install.esd" -Force
+            
+            # 从ESD导出为基础WIM（首次创建WIM文件）
+            Write-Output "Creating base WIM from Win10 x86 install.esd..."
+            $dismLog = "$env:TEMP\x86_dism_export.log"
+            dism /Export-Image `
+                /SourceImageFile:"x86_install.esd" `
+                /SourceIndex:1 `
+                /DestinationImageFile:"$env:OUTPUT_WIM_NAME" `
+                /Compress:max `
+                /CheckIntegrity `
+                /LogPath:$dismLog
+            
+            if ($LASTEXITCODE -ne 0) {
+                $logContent = if (Test-Path $dismLog) { Get-Content $dismLog -Raw } else { "No log file" }
+                Write-Output "DISM Export Log: $logContent"
+                throw "Failed to create base WIM (exit code: $LASTEXITCODE)"
+            }
+            
+            # 验证WIM创建
+            if (Test-Path "$env:OUTPUT_WIM_NAME") {
+                $wimSize = [math]::Round((Get-Item "$env:OUTPUT_WIM_NAME").Length / 1GB, 2)
+                Write-Output "Base WIM created successfully (size: $wimSize GB)"
+            } else {
+                throw "Base WIM file was not created"
+            }
+            
         } finally {
-            # Ensure ISO is always dismounted
+            # 确保ISO始终卸载
             if ($mountResult) {
-                Write-Output "Dismounting ISO in finally block..."
+                Write-Output "Dismounting Win10 x86 ISO..."
                 Dismount-DiskImage -ImagePath $isoFile.FullName -Confirm:$false -ErrorAction SilentlyContinue
             }
         }
         
-        # Clean up temporary files
+        # 清理临时文件
         Write-Output "Cleaning up Win10 x86 temporary files..."
-        if (Test-Path "Windows10_LTSC2021_x86-19044.6811.7z.001") { Remove-Item "Windows10_LTSC2021_x86-19044.6811.7z.001" -Force }
-        if (Test-Path "Windows10_LTSC2021_x86-19044.6811.7z.002") { Remove-Item "Windows10_LTSC2021_x86-19044.6811.7z.002" -Force }
-        if (Test-Path $isoFile.FullName) { Remove-Item $isoFile.FullName -Force }
-        if (Test-Path "x86_install.esd") { Remove-Item "x86_install.esd" -Force }
-        if (Test-Path "x86_extract") { Remove-Item "x86_extract" -Recurse -Force }
+        Remove-Item -Path "Windows10_LTSC2021_x86-19044.6811.7z.*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $isoFile.FullName -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "x86_install.esd" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "x86_extract" -Recurse -Force -ErrorAction SilentlyContinue
 
-    # Process Win10 x64 LTSC 2021
+    # ===================== Win10 x64 LTSC 2021 处理（核心修复） =====================
     - name: Download Win10 x64 7z parts
+      if: github.event.inputs.skip_download_extract == false
       run: |
         Set-Location "$env:TEMP\merge_process"
         
         Write-Output "Downloading Win10 x64 7z parts..."
         
-        # Download first part
+        # 检查缓存文件
+        $files = @(
+            "Windows10_LTSC2021_amd64-19044.6811.7z.001",
+            "Windows10_LTSC2021_amd64-19044.6811.7z.002",
+            "Windows10_LTSC2021_amd64-19044.6811.7z.003"
+        )
+        $allExists = $true
+        foreach ($file in $files) {
+            if (-not (Test-Path $file)) {
+                $allExists = $false
+                break
+            }
+        }
+        if ($allExists) {
+            Write-Output "Win10 x64 7z files already exist, skipping download"
+            exit 0
+        }
+        
+        # 下载分卷
         Write-Output "Downloading part 1..."
-        curl -L -o "Windows10_LTSC2021_amd64-19044.6811.7z.001" "$env:WIN10_X64_URL_1"
+        curl -L -o $files[0] "$env:WIN10_X64_URL_1"
+        if ($LASTEXITCODE -ne 0) { throw "Failed to download Win10 x64 part 1 (exit code: $LASTEXITCODE)" }
         
-        # Check if download succeeded
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to download first part of x64 ISO with exit code: $LASTEXITCODE"
-        }
-        
-        # Download second part
         Write-Output "Downloading part 2..."
-        curl -L -o "Windows10_LTSC2021_amd64-19044.6811.7z.002" "$env:WIN10_X64_URL_2"
+        curl -L -o $files[1] "$env:WIN10_X64_URL_2"
+        if ($LASTEXITCODE -ne 0) { throw "Failed to download Win10 x64 part 2 (exit code: $LASTEXITCODE)" }
         
-        # Check if download succeeded
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to download second part of x64 ISO with exit code: $LASTEXITCODE"
-        }
-        
-        # Download third part
         Write-Output "Downloading part 3..."
-        curl -L -o "Windows10_LTSC2021_amd64-19044.6811.7z.003" "$env:WIN10_X64_URL_3"
+        curl -L -o $files[2] "$env:WIN10_X64_URL_3"
+        if ($LASTEXITCODE -ne 0) { throw "Failed to download Win10 x64 part 3 (exit code: $LASTEXITCODE)" }
         
-        # Check if download succeeded
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to download third part of x64 ISO with exit code: $LASTEXITCODE"
-        }
-        
-        Write-Output "Download completed for Win10 x64"
+        Write-Output "Win10 x64 download completed successfully"
 
     - name: Extract Win10 x64 ISO and process
+      if: github.event.inputs.skip_download_extract == false
       run: |
         Set-Location "$env:TEMP\merge_process"
         
         Write-Output "Extracting Win10 x64 archive..."
-        & 7z x "Windows10_LTSC2021_amd64-19044.6811.7z.001" -o"x64_extract" -y  # 新增：-y 自动覆盖
-        
-        # Check if 7z extraction succeeded
+        & 7z x "Windows10_LTSC2021_amd64-19044.6811.7z.001" -o"x64_extract" -y
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed to extract x64 ISO with 7z exit code: $LASTEXITCODE"
+            throw "Failed to extract Win10 x64 archive (exit code: $LASTEXITCODE)"
         }
         
-        # Find the ISO file
-        $isoFile = Get-ChildItem -Path "x64_extract" -Filter "*.iso" | Select-Object -First 1
+        # 查找ISO文件
+        $isoFile = Get-ChildItem -Path "x64_extract" -Filter "*.iso" -Recurse | Select-Object -First 1
         if ($null -eq $isoFile) {
-            throw "ISO file not found in x64 extraction"
+            throw "No ISO file found in Win10 x64 extract directory"
         }
+        Write-Output "Found Win10 x64 ISO: $($isoFile.FullName)"
         
-        Write-Output "Found ISO: $($isoFile.FullName)"
-        
-        # Mount ISO to extract install.esd with try/finally to ensure unmount
+        # 挂载ISO并提取install.esd
         $mountResult = $null
         try {
-            $mountResult = Mount-DiskImage -ImagePath $isoFile.FullName -PassThru
-                    
-            # Check if mount was successful
-            if ($null -eq $mountResult) {
-                throw "Failed to mount ISO file: $($isoFile.FullName)"
-            }
-                    
-            # Get drive letter and check it exists
+            $mountResult = Mount-DiskImage -ImagePath $isoFile.FullName -PassThru -ErrorAction Stop
             $driveLetter = ($mountResult | Get-Volume).DriveLetter
-                    
+            
             if ([string]::IsNullOrEmpty($driveLetter)) {
-                Write-Output "Drive letter is null or empty, trying alternative method..."
-                # Improved way to get drive letter based on the mounted image
-                $driveLetter = (Get-DiskImage -ImagePath $isoFile.FullName | Get-Volume).DriveLetter
-                        
-                if ([string]::IsNullOrEmpty($driveLetter)) {
-                    # Last resort: try the original method
-                    $volumeInfo = Get-Volume | Where-Object { $_.FileSystemLabel -like "*Windows*" -or $_.FileSystemLabel -like "*DVD*" -or $_.FileSystemLabel -like "*ISO*" }
-                    if ($volumeInfo -and $volumeInfo.DriveLetter) {
-                        $driveLetter = $volumeInfo.DriveLetter
-                    }
-                }
+                throw "Failed to get drive letter for mounted ISO"
             }
-                    
-            if ([string]::IsNullOrEmpty($driveLetter)) {
-                throw "Could not determine drive letter for mounted ISO: $($isoFile.FullName)"
-            }
-                    
-            Write-Output "ISO mounted successfully on drive ${driveLetter}:"
-                    
-            # Copy sources\install.esd to working directory
+            Write-Output "ISO mounted to drive ${driveLetter}:"
+            
+            # 复制install.esd
             $sourceEsd = "${driveLetter}:\sources\install.esd"
-            if (Test-Path $sourceEsd) {
-                Write-Output "Copying install.esd from ISO..."
-                Copy-Item $sourceEsd -Destination "x64_install.esd"
-                        
-                # Add first image from x64 install.esd to existing WIM
-                Write-Output "Adding first image from x64 install.esd to existing WIM..."
-                $dismLog = "$env:TEMP\x64_dism_append.log"
-                # 关键修改：修复DISM /Append-Image的参数格式
-                dism /Append-Image /ImageFile:"$env:OUTPUT_WIM_NAME" /SourceImageFile:"x64_install.esd" /SourceIndex:1 /Name:"Windows 10 x64 LTSC 2021" /CheckIntegrity /LogPath:$dismLog
-                        
-                # Check if DISM command succeeded
-                if ($LASTEXITCODE -ne 0) {
-                    $logContent = if (Test-Path $dismLog) { Get-Content $dismLog -Raw } else { "Log file not found" }
-                    Write-Output "DISM Log Content: $logContent"
-                    throw "Failed to add x64 install.esd to WIM file with exit code: $LASTEXITCODE"
-                }
-                        
-                # Output DISM log content for debugging
-                if (Test-Path $dismLog) {
-                    $logContent = Get-Content $dismLog -Raw
-                    Write-Output "DISM Append Log: $logContent"
-                }
-                        
-                Write-Output "WIM file after append: $(Test-Path "$env:OUTPUT_WIM_NAME")"
-                if (Test-Path "$env:OUTPUT_WIM_NAME") {
-                    Write-Output "WIM file size after append: $((Get-Item "$env:OUTPUT_WIM_NAME").Length) bytes"
-                }
-                        
-                Write-Output "Successfully added first image from x64 install.esd"
-            } else {
-                throw "install.esd not found in ISO sources folder at path: $sourceEsd"
+            if (-not (Test-Path $sourceEsd)) {
+                throw "install.esd not found at $sourceEsd"
             }
+            Write-Output "Copying install.esd from ISO..."
+            Copy-Item $sourceEsd -Destination "x64_install.esd" -Force
+            
+            # 关键修复：ESD无法直接Append，先导出为临时WIM
+            Write-Output "Converting Win10 x64 ESD to temporary WIM..."
+            $tempWim = "x64_temp.wim"
+            $exportLog = "$env:TEMP\x64_esd_to_wim.log"
+            dism /Export-Image `
+                /SourceImageFile:"x64_install.esd" `
+                /SourceIndex:1 `
+                /DestinationImageFile:$tempWim `
+                /Compress:fast `
+                /CheckIntegrity `
+                /LogPath:$exportLog
+            
+            if ($LASTEXITCODE -ne 0) {
+                $logContent = if (Test-Path $exportLog) { Get-Content $exportLog -Raw } else { "No log file" }
+                Write-Output "ESD to WIM Export Log: $logContent"
+                throw "Failed to convert ESD to WIM (exit code: $LASTEXITCODE)"
+            }
+            
+            # 追加临时WIM到主WIM文件
+            Write-Output "Appending Win10 x64 image to main WIM..."
+            $appendLog = "$env:TEMP\x64_dism_append.log"
+            dism /Append-Image `
+                /ImageFile:"$env:OUTPUT_WIM_NAME" `
+                /SourceImageFile:$tempWim `
+                /SourceIndex:1 `
+                /CheckIntegrity `
+                /Name:"Windows 10 x64 LTSC 2021" `
+                /LogPath:$appendLog
+            
+            if ($LASTEXITCODE -ne 0) {
+                $logContent = if (Test-Path $appendLog) { Get-Content $appendLog -Raw } else { "No log file" }
+                Write-Output "DISM Append Log: $logContent"
+                throw "Failed to append Win10 x64 image (exit code: $LASTEXITCODE)"
+            }
+            
+            # 验证追加结果
+            if (Test-Path "$env:OUTPUT_WIM_NAME") {
+                $wimSize = [math]::Round((Get-Item "$env:OUTPUT_WIM_NAME").Length / 1GB, 2)
+                Write-Output "Win10 x64 appended successfully (main WIM size: $wimSize GB)"
+            }
+            
+            # 删除临时WIM
+            Remove-Item -Path $tempWim -Force -ErrorAction SilentlyContinue
+            
         } finally {
-            # Ensure ISO is always dismounted
+            # 确保ISO始终卸载
             if ($mountResult) {
-                Write-Output "Dismounting ISO in finally block..."
+                Write-Output "Dismounting Win10 x64 ISO..."
                 Dismount-DiskImage -ImagePath $isoFile.FullName -Confirm:$false -ErrorAction SilentlyContinue
             }
         }
         
-        # Clean up temporary files
+        # 清理临时文件
         Write-Output "Cleaning up Win10 x64 temporary files..."
-        if (Test-Path "Windows10_LTSC2021_amd64-19044.6811.7z.001") { Remove-Item "Windows10_LTSC2021_amd64-19044.6811.7z.001" -Force }
-        if (Test-Path "Windows10_LTSC2021_amd64-19044.6811.7z.002") { Remove-Item "Windows10_LTSC2021_amd64-19044.6811.7z.002" -Force }
-        if (Test-Path "Windows10_LTSC2021_amd64-19044.6811.7z.003") { Remove-Item "Windows10_LTSC2021_amd64-19044.6811.7z.003" -Force }
-        if (Test-Path $isoFile.FullName) { Remove-Item $isoFile.FullName -Force }
-        if (Test-Path "x64_install.esd") { Remove-Item "x64_install.esd" -Force }
-        if (Test-Path "x64_extract") { Remove-Item "x64_extract" -Recurse -Force }
+        Remove-Item -Path "Windows10_LTSC2021_amd64-19044.6811.7z.*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $isoFile.FullName -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "x64_install.esd" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "x64_extract" -Recurse -Force -ErrorAction SilentlyContinue
 
-    # Process Win11 x64 LTSC 2024
+    # ===================== Win11 x64 LTSC 2024 处理（核心修复） =====================
     - name: Download Win11 x64 7z parts
+      if: github.event.inputs.skip_download_extract == false
       run: |
         Set-Location "$env:TEMP\merge_process"
         
         Write-Output "Downloading Win11 x64 7z parts..."
         
-        # Download first part
+        # 检查缓存文件
+        $files = @(
+            "Windows11_LTSC2024_amd64-26200.7627.7z.001",
+            "Windows11_LTSC2024_amd64-26200.7627.7z.002",
+            "Windows11_LTSC2024_amd64-26200.7627.7z.003"
+        )
+        $allExists = $true
+        foreach ($file in $files) {
+            if (-not (Test-Path $file)) {
+                $allExists = $false
+                break
+            }
+        }
+        if ($allExists) {
+            Write-Output "Win11 x64 7z files already exist, skipping download"
+            exit 0
+        }
+        
+        # 下载分卷
         Write-Output "Downloading part 1..."
-        curl -L -o "Windows11_LTSC2024_amd64-26200.7627.7z.001" "$env:WIN11_X64_URL_1"
+        curl -L -o $files[0] "$env:WIN11_X64_URL_1"
+        if ($LASTEXITCODE -ne 0) { throw "Failed to download Win11 x64 part 1 (exit code: $LASTEXITCODE)" }
         
-        # Check if download succeeded
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to download first part of Win11 ISO with exit code: $LASTEXITCODE"
-        }
-        
-        # Download second part
         Write-Output "Downloading part 2..."
-        curl -L -o "Windows11_LTSC2024_amd64-26200.7627.7z.002" "$env:WIN11_X64_URL_2"
+        curl -L -o $files[1] "$env:WIN11_X64_URL_2"
+        if ($LASTEXITCODE -ne 0) { throw "Failed to download Win11 x64 part 2 (exit code: $LASTEXITCODE)" }
         
-        # Check if download succeeded
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to download second part of Win11 ISO with exit code: $LASTEXITCODE"
-        }
-        
-        # Download third part
         Write-Output "Downloading part 3..."
-        curl -L -o "Windows11_LTSC2024_amd64-26200.7627.7z.003" "$env:WIN11_X64_URL_3"
+        curl -L -o $files[2] "$env:WIN11_X64_URL_3"
+        if ($LASTEXITCODE -ne 0) { throw "Failed to download Win11 x64 part 3 (exit code: $LASTEXITCODE)" }
         
-        # Check if download succeeded
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to download third part of Win11 ISO with exit code: $LASTEXITCODE"
-        }
-        
-        Write-Output "Download completed for Win11 x64"
+        Write-Output "Win11 x64 download completed successfully"
 
     - name: Extract Win11 x64 ISO and process
+      if: github.event.inputs.skip_download_extract == false
       run: |
         Set-Location "$env:TEMP\merge_process"
         
         Write-Output "Extracting Win11 x64 archive..."
-        & 7z x "Windows11_LTSC2024_amd64-26200.7627.7z.001" -o"win11_extract" -y  # 新增：-y 自动覆盖
-        
-        # Check if 7z extraction succeeded
+        & 7z x "Windows11_LTSC2024_amd64-26200.7627.7z.001" -o"win11_extract" -y
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed to extract Win11 ISO with 7z exit code: $LASTEXITCODE"
+            throw "Failed to extract Win11 x64 archive (exit code: $LASTEXITCODE)"
         }
         
-        # Find the ISO file
-        $isoFile = Get-ChildItem -Path "win11_extract" -Filter "*.iso" | Select-Object -First 1
+        # 查找ISO文件
+        $isoFile = Get-ChildItem -Path "win11_extract" -Filter "*.iso" -Recurse | Select-Object -First 1
         if ($null -eq $isoFile) {
-            throw "ISO file not found in Win11 extraction"
+            throw "No ISO file found in Win11 x64 extract directory"
         }
+        Write-Output "Found Win11 x64 ISO: $($isoFile.FullName)"
         
-        Write-Output "Found ISO: $($isoFile.FullName)"
-        
-        # Mount ISO to extract install.esd with try/finally to ensure unmount
+        # 挂载ISO并提取install.esd
         $mountResult = $null
         try {
-            $mountResult = Mount-DiskImage -ImagePath $isoFile.FullName -PassThru
-                    
-            # Check if mount was successful
-            if ($null -eq $mountResult) {
-                throw "Failed to mount ISO file: $($isoFile.FullName)"
-            }
-                    
-            # Get drive letter and check it exists
+            $mountResult = Mount-DiskImage -ImagePath $isoFile.FullName -PassThru -ErrorAction Stop
             $driveLetter = ($mountResult | Get-Volume).DriveLetter
-                    
+            
             if ([string]::IsNullOrEmpty($driveLetter)) {
-                Write-Output "Drive letter is null or empty, trying alternative method..."
-                # Improved way to get drive letter based on the mounted image
-                $driveLetter = (Get-DiskImage -ImagePath $isoFile.FullName | Get-Volume).DriveLetter
-                        
-                if ([string]::IsNullOrEmpty($driveLetter)) {
-                    # Last resort: try the original method
-                    $volumeInfo = Get-Volume | Where-Object { $_.FileSystemLabel -like "*Windows*" -or $_.FileSystemLabel -like "*DVD*" -or $_.FileSystemLabel -like "*ISO*" }
-                    if ($volumeInfo -and $volumeInfo.DriveLetter) {
-                        $driveLetter = $volumeInfo.DriveLetter
-                    }
-                }
+                throw "Failed to get drive letter for mounted ISO"
             }
-                    
-            if ([string]::IsNullOrEmpty($driveLetter)) {
-                throw "Could not determine drive letter for mounted ISO: $($isoFile.FullName)"
-            }
-                    
-            Write-Output "ISO mounted successfully on drive ${driveLetter}:"
-                    
-            # Copy sources\install.esd to working directory
+            Write-Output "ISO mounted to drive ${driveLetter}:"
+            
+            # 复制install.esd
             $sourceEsd = "${driveLetter}:\sources\install.esd"
-            if (Test-Path $sourceEsd) {
-                Write-Output "Copying install.esd from ISO..."
-                Copy-Item $sourceEsd -Destination "win11_install.esd"
-                        
-                # Add first image from Win11 install.esd to existing WIM
-                Write-Output "Adding first image from Win11 install.esd to existing WIM..."
-                $dismLog = "$env:TEMP\win11_dism_append.log"
-                # 关键修改：修复DISM /Append-Image的参数格式
-                dism /Append-Image /ImageFile:"$env:OUTPUT_WIM_NAME" /SourceImageFile:"win11_install.esd" /SourceIndex:1 /Name:"Windows 11 x64 LTSC 2024" /CheckIntegrity /LogPath:$dismLog
-                        
-                # Check if DISM command succeeded
-                if ($LASTEXITCODE -ne 0) {
-                    $logContent = if (Test-Path $dismLog) { Get-Content $dismLog -Raw } else { "Log file not found" }
-                    Write-Output "DISM Log Content: $logContent"
-                    throw "Failed to add Win11 install.esd to WIM file with exit code: $LASTEXITCODE"
-                }
-                        
-                # Output DISM log content for debugging
-                if (Test-Path $dismLog) {
-                    $logContent = Get-Content $dismLog -Raw
-                    Write-Output "DISM Append Log: $logContent"
-                }
-                        
-                Write-Output "WIM file after append: $(Test-Path "$env:OUTPUT_WIM_NAME")"
-                if (Test-Path "$env:OUTPUT_WIM_NAME") {
-                    Write-Output "WIM file size after append: $((Get-Item "$env:OUTPUT_WIM_NAME").Length) bytes"
-                }
-                        
-                Write-Output "Successfully added first image from Win11 install.esd"
-            } else {
-                throw "install.esd not found in ISO sources folder at path: $sourceEsd"
+            if (-not (Test-Path $sourceEsd)) {
+                throw "install.esd not found at $sourceEsd"
             }
+            Write-Output "Copying install.esd from ISO..."
+            Copy-Item $sourceEsd -Destination "win11_install.esd" -Force
+            
+            # 关键修复：ESD转临时WIM
+            Write-Output "Converting Win11 x64 ESD to temporary WIM..."
+            $tempWim = "win11_temp.wim"
+            $exportLog = "$env:TEMP\win11_esd_to_wim.log"
+            dism /Export-Image `
+                /SourceImageFile:"win11_install.esd" `
+                /SourceIndex:1 `
+                /DestinationImageFile:$tempWim `
+                /Compress:fast `
+                /CheckIntegrity `
+                /LogPath:$exportLog
+            
+            if ($LASTEXITCODE -ne 0) {
+                $logContent = if (Test-Path $exportLog) { Get-Content $exportLog -Raw } else { "No log file" }
+                Write-Output "ESD to WIM Export Log: $logContent"
+                throw "Failed to convert ESD to WIM (exit code: $LASTEXITCODE)"
+            }
+            
+            # 追加临时WIM到主WIM文件
+            Write-Output "Appending Win11 x64 image to main WIM..."
+            $appendLog = "$env:TEMP\win11_dism_append.log"
+            dism /Append-Image `
+                /ImageFile:"$env:OUTPUT_WIM_NAME" `
+                /SourceImageFile:$tempWim `
+                /SourceIndex:1 `
+                /CheckIntegrity `
+                /Name:"Windows 11 x64 LTSC 2024" `
+                /LogPath:$appendLog
+            
+            if ($LASTEXITCODE -ne 0) {
+                $logContent = if (Test-Path $appendLog) { Get-Content $appendLog -Raw } else { "No log file" }
+                Write-Output "DISM Append Log: $logContent"
+                throw "Failed to append Win11 x64 image (exit code: $LASTEXITCODE)"
+            }
+            
+            # 验证追加结果
+            if (Test-Path "$env:OUTPUT_WIM_NAME") {
+                $wimSize = [math]::Round((Get-Item "$env:OUTPUT_WIM_NAME").Length / 1GB, 2)
+                Write-Output "Win11 x64 appended successfully (main WIM size: $wimSize GB)"
+            }
+            
+            # 删除临时WIM
+            Remove-Item -Path $tempWim -Force -ErrorAction SilentlyContinue
+            
         } finally {
-            # Ensure ISO is always dismounted
+            # 确保ISO始终卸载
             if ($mountResult) {
-                Write-Output "Dismounting ISO in finally block..."
+                Write-Output "Dismounting Win11 x64 ISO..."
                 Dismount-DiskImage -ImagePath $isoFile.FullName -Confirm:$false -ErrorAction SilentlyContinue
             }
         }
         
-        # Clean up temporary files
+        # 清理临时文件
         Write-Output "Cleaning up Win11 x64 temporary files..."
-        if (Test-Path "Windows11_LTSC2024_amd64-26200.7627.7z.001") { Remove-Item "Windows11_LTSC2024_amd64-26200.7627.7z.001" -Force }
-        if (Test-Path "Windows11_LTSC2024_amd64-26200.7627.7z.002") { Remove-Item "Windows11_LTSC2024_amd64-26200.7627.7z.002" -Force }
-        if (Test-Path "Windows11_LTSC2024_amd64-26200.7627.7z.003") { Remove-Item "Windows11_LTSC2024_amd64-26200.7627.7z.003" -Force }
-        if (Test-Path $isoFile.FullName) { Remove-Item $isoFile.FullName -Force }
-        if (Test-Path "win11_install.esd") { Remove-Item "win11_install.esd" -Force }
-        if (Test-Path "win11_extract") { Remove-Item "win11_extract" -Recurse -Force }
+        Remove-Item -Path "Windows11_LTSC2024_amd64-26200.7627.7z.*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $isoFile.FullName -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "win11_install.esd" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "win11_extract" -Recurse -Force -ErrorAction SilentlyContinue
 
-    # Convert WIM to ESD
+    # ===================== 转换WIM到高压缩ESD =====================
     - name: Convert WIM to ESD with high compression
       run: |
         Set-Location "$env:TEMP\merge_process"
         
-        Write-Output "Converting WIM to ESD with high compression..."
+        Write-Output "Starting WIM to ESD conversion..."
         
-        # Check if WIM file exists
+        # 检查主WIM是否存在
         if (-not (Test-Path "$env:OUTPUT_WIM_NAME")) {
-            Write-Output "ERROR: WIM file does not exist: $env:OUTPUT_WIM_NAME"
-            throw "WIM file was not created"
+            throw "Main WIM file not found: $env:OUTPUT_WIM_NAME"
         }
         
-        Write-Output "WIM file size: $((Get-Item "$env:OUTPUT_WIM_NAME").Length) bytes"
-        
-        # Get image information from the WIM file
+        # 获取WIM镜像数量
+        Write-Output "Getting WIM image information..."
         $imageInfo = dism /Get-ImageInfo /ImageFile:"$env:OUTPUT_WIM_NAME"
         $imageInfoText = $imageInfo | Out-String
-        Write-Output "WIM Info: $imageInfoText"
-        
-        # Parse image count from the output
-        Write-Output "Attempting to parse image count from WIM info..."
-        
         $imageCountMatch = [regex]::Match($imageInfoText, "Image Count: (\d+)")
-        Write-Output "Regex match result: Success=$($imageCountMatch.Success), Value='$($imageCountMatch.Value)', Groups=$($imageCountMatch.Groups.Count)"
         
-        if ($imageCountMatch.Success -and $imageCountMatch.Groups.Count -gt 1) {
+        if ($imageCountMatch.Success) {
             $imageCount = [int]$imageCountMatch.Groups[1].Value
-            Write-Output "Parsed image count from regex: $imageCount"
+            Write-Output "Found $imageCount images in main WIM file"
         } else {
-            Write-Output "Regex parsing failed, trying alternative method..."
-            # Alternative: count Image Information blocks
-            $indexMatches = $imageInfoText | Select-String -Pattern "Index" -AllMatches
-            $imageCount = $indexMatches.Matches.Count
-            Write-Output "Counted Index matches: $imageCount"
-            
-            if ($imageCount -eq 0) {
-                Write-Output "Still zero, checking for other indicators..."
-                # Look for other indicators like "Image [Number]" patterns
-                $imageMatches = [regex]::Matches($imageInfoText, "Image \d+")
-                $imageCount = $imageMatches.Count
-                Write-Output "Counted Image patterns: $imageCount"
-                
-                if ($imageCount -eq 0) {
-                    # If still zero, assume at least 1 image exists
-                    Write-Output "Assuming at least 1 image exists in WIM file"
-                    $imageCount = 1
-                }
-            }
+            Write-Output "Could not parse image count, assuming 1 image"
+            $imageCount = 1
         }
         
-        Write-Output "Found $imageCount images in WIM file, processing all..."
+        # 导出所有镜像到ESD（recovery压缩级别：最高压缩）
+        $esdLog = "$env:TEMP\wim_to_esd.log"
+        dism /Export-Image `
+            /SourceImageFile:"$env:OUTPUT_WIM_NAME" `
+            /SourceAll `
+            /DestinationImageFile:"$env:OUTPUT_ESD_NAME" `
+            /Compress:recovery `
+            /CheckIntegrity `
+            /LogPath:$esdLog
         
-        if ($imageCount -gt 0) {
-            # Export ALL images from WIM to ESD with recovery compression in one operation
-            Write-Output "Exporting all $imageCount images from WIM to ESD..."
-            $dismEsdLog = "$env:TEMP\esd_export.log"  # 新增：添加日志
-            dism /Export-Image /SourceImageFile:"$env:OUTPUT_WIM_NAME" /SourceAll /DestinationImageFile:"$env:OUTPUT_ESD_NAME" /Compress:recovery /CheckIntegrity /LogPath:$dismEsdLog
-            
-            # Check if DISM command succeeded
-            if ($LASTEXITCODE -ne 0) {
-                $logContent = if (Test-Path $dismEsdLog) { Get-Content $dismEsdLog -Raw } else { "Log file not found" }
-                Write-Output "DISM ESD Export Log: $logContent"
-                throw "Failed to export WIM to ESD with exit code: $LASTEXITCODE"
-            }
-            
-            Write-Output "Successfully exported all images to ESD file"
-        } else {
-            Write-Output "No images found in WIM file, attempting direct conversion..."
-            # Fallback: convert WIM to ESD using recovery compression
-            $dismEsdLog = "$env:TEMP\esd_export_fallback.log"
-            dism /Export-Image /SourceImageFile:"$env:OUTPUT_WIM_NAME" /SourceIndex:1 /DestinationImageFile:"$env:OUTPUT_ESD_NAME" /Compress:recovery /CheckIntegrity /LogPath:$dismEsdLog
-            
-            # Check if DISM command succeeded
-            if ($LASTEXITCODE -ne 0) {
-                $logContent = if (Test-Path $dismEsdLog) { Get-Content $dismEsdLog -Raw } else { "Log file not found" }
-                Write-Output "DISM ESD Export Fallback Log: $logContent"
-                throw "Failed to export WIM to ESD with exit code: $LASTEXITCODE"
-            }
+        if ($LASTEXITCODE -ne 0) {
+            $logContent = if (Test-Path $esdLog) { Get-Content $esdLog -Raw } else { "No log file" }
+            Write-Output "WIM to ESD Export Log: $logContent"
+            throw "Failed to convert WIM to ESD (exit code: $LASTEXITCODE)"
         }
         
-        Write-Output "Successfully converted WIM to ESD with high compression"
+        # 验证ESD创建
+        if (Test-Path "$env:OUTPUT_ESD_NAME") {
+            $esdSize = [math]::Round((Get-Item "$env:OUTPUT_ESD_NAME").Length / 1GB, 2)
+            Write-Output "ESD created successfully (size: $esdSize GB)"
+        } else {
+            throw "ESD file was not created"
+        }
 
-    # Verify generated ESD file
+    # ===================== 验证ESD文件 =====================
     - name: Verify ESD file
       run: |
         Set-Location "$env:TEMP\merge_process"
         
-        if (Test-Path "$env:OUTPUT_ESD_NAME") {
-          $esdSize = (Get-Item "$env:OUTPUT_ESD_NAME").Length
-          $esdSizeMB = [math]::Round($esdSize / 1MB, 2)
-          Write-Output "ESD file created successfully. Size: $esdSizeMB MB"
-          
-          # Show image information
-          dism /Get-ImageInfo /ImageFile:"$env:OUTPUT_ESD_NAME"
-        } else {
-          Write-Output "ERROR: ESD file was not created at: $env:OUTPUT_ESD_NAME"
-          Write-Output "Current directory contents:"
-          Get-ChildItem -Path .
-          throw "ESD file was not created"
+        Write-Output "Verifying ESD file integrity..."
+        
+        if (-not (Test-Path "$env:OUTPUT_ESD_NAME")) {
+            throw "ESD file not found: $env:OUTPUT_ESD_NAME"
         }
+        
+        # 检查ESD镜像信息
+        Write-Output "Checking ESD image information..."
+        dism /Get-ImageInfo /ImageFile:"$env:OUTPUT_ESD_NAME"
+        if ($LASTEXITCODE -ne 0) {
+            throw "ESD file is corrupted (DISM verification failed)"
+        }
+        
+        $esdSize = [math]::Round((Get-Item "$env:OUTPUT_ESD_NAME").Length / 1MB, 2)
+        Write-Output "ESD verification passed (size: $esdSize MB)"
 
-    # Split archive to 1950M parts
+    # ===================== 分割ESD为1950M分卷 =====================
     - name: Split ESD file to 1950M parts
       run: |
         Set-Location "$env:TEMP\merge_process"
         
-        Write-Output "Splitting ESD file to ${env:PART_SIZE} parts..."
+        Write-Output "Splitting ESD file into ${env:PART_SIZE} parts..."
         
-        # Use 7z to split the ESD file
-        $partSizeLower = $env:PART_SIZE.ToLower()
-        & 7z a -v$partSizeLower -m0=lzma2 -mx=9 -ms=on -y "$env:OUTPUT_ESD_NAME.7z" "$env:OUTPUT_ESD_NAME"
-        
-        # Check if 7z split succeeded
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to split ESD file with 7z exit code: $LASTEXITCODE"
+        if (-not (Test-Path "$env:OUTPUT_ESD_NAME")) {
+            throw "ESD file not found for splitting"
         }
         
-        Write-Output "Successfully split ESD file to ${env:PART_SIZE} parts"
+        # 7z分卷参数（lzma2算法，最高压缩，固实压缩）
+        $partSizeLower = $env:PART_SIZE.ToLower()
+        & 7z a `
+            -v$partSizeLower `
+            -m0=lzma2 `
+            -mx=9 `
+            -ms=on `
+            -y `
+            "$env:OUTPUT_ESD_NAME.7z" `
+            "$env:OUTPUT_ESD_NAME"
         
-        # Verify split 7z parts
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to split ESD file (7z exit code: $LASTEXITCODE)"
+        }
+        
+        # 验证分卷完整性
         Write-Output "Verifying split 7z parts..."
         & 7z t "$env:OUTPUT_ESD_NAME.7z.001"
         if ($LASTEXITCODE -ne 0) {
-            throw "7z split parts are corrupted (exit code: $LASTEXITCODE)"
+            throw "7z split parts are corrupted (verification failed)"
         }
-        Write-Output "7z split parts verified successfully"
+        
+        # 列出分卷文件
+        Write-Output "Split completed successfully. Created files:"
+        Get-ChildItem -Path "$env:OUTPUT_ESD_NAME.7z.*" | ForEach-Object {
+            $size = [math]::Round($_.Length / 1MB, 2)
+            Write-Output "  - $($_.Name) ($size MB)"
+        }
 
-    # Cleanup original unsplit ESD file
+    # ===================== 清理原始ESD文件 =====================
     - name: Cleanup original ESD file
       run: |
         Set-Location "$env:TEMP\merge_process"
         
-        Write-Output "Removing original ESD file after splitting..."
-        if (Test-Path "$env:OUTPUT_ESD_NAME") { Remove-Item "$env:OUTPUT_ESD_NAME" -Force }
+        Write-Output "Cleaning up original ESD file..."
+        if (Test-Path "$env:OUTPUT_ESD_NAME") {
+            Remove-Item -Path "$env:OUTPUT_ESD_NAME" -Force
+            Write-Output "Original ESD file deleted"
+        }
         
-        Write-Output "Original ESD file removed. Keeping only split parts."
-
-    # Display final file list
-    - name: List final files
-      run: |
-        Set-Location "$env:TEMP\merge_process"
-        
-        Write-Output "Final files:"
-        Get-ChildItem -Path . -Filter "$env:OUTPUT_ESD_NAME.7z.*" | ForEach-Object {
-          $sizeMB = [math]::Round($_.Length / 1MB, 2)
-          Write-Output "$($_.Name) - Size: $sizeMB MB"
+        # 清理主WIM文件（释放空间）
+        if (Test-Path "$env:OUTPUT_WIM_NAME") {
+            Remove-Item -Path "$env:OUTPUT_WIM_NAME" -Force
+            Write-Output "Main WIM file deleted"
         }
 
-    # Upload final merged ESD to GitHub Releases
+    # ===================== 上传到GitHub Releases =====================
     - name: Upload to GitHub Releases
+      id: release_upload
+      continue-on-error: true
       uses: softprops/action-gh-release@v2
       with:
         name: Windows10_LTSC_2021_32_and_64_Windows_11_LTSC_2025
         tag_name: Windows10_LTSC_2021_32_and_64_Windows_11_LTSC_2025
-        append: true  # 新增：追加文件而非覆盖
+        append: true  # 追加文件而非覆盖
         draft: false
         prerelease: false
         files: |
           ${{ env.TEMP }}\merge_process\${{ env.OUTPUT_ESD_NAME }}.7z.*
         token: ${{ secrets.GITHUB_TOKEN }}
+
+    # ===================== 失败时备份到Artifact（可选） =====================
+    - name: Backup to Artifact if Release upload failed
+      if: steps.release_upload.outcome == 'failure'
+      uses: actions/upload-artifact@v4
+      with:
+        name: esd-split-parts-backup
+        path: ${{ env.TEMP }}\merge_process\${{ env.OUTPUT_ESD_NAME }}.7z.*
+        retention-days: 3  # 仅保留3天
+        compression-level: 0  # 关闭压缩（已用7z压缩）
