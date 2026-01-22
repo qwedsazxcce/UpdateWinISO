@@ -93,10 +93,9 @@ jobs:
             Write-Host "Found ESD file: $($esdFile.Name)"
             
             if (Test-Path $esdFile.FullName) {
-                7z x "$($esdFile.FullName)" -oextracted_esd
-                if ($LASTEXITCODE -ne 0) {
-                    throw "Failed to extract ESD file"
-                }
+                # Copy the ESD file to extracted_esd directory since DISM needs the original file
+                mkdir extracted_esd -ErrorAction SilentlyContinue
+                Copy-Item $esdFile.FullName -Destination "extracted_esd\install.esd"
                 
                 cd extracted_esd
                 if (Test-Path "install.esd") {
@@ -107,7 +106,7 @@ jobs:
                     }
                     Write-Host "Successfully created initial WIM file"
                 } else {
-                    throw "install.esd not found after extraction"
+                    throw "install.esd not found after copying"
                 }
             } else {
                 throw "ESD file path does not exist: $($esdFile.FullName)"
@@ -189,10 +188,9 @@ jobs:
             Write-Host "Found ESD file: $($esdFile.Name)"
             
             if (Test-Path $esdFile.FullName) {
-                7z x "$($esdFile.FullName)" -oextracted_esd
-                if ($LASTEXITCODE -ne 0) {
-                    throw "Failed to extract ESD file"
-                }
+                # Copy the ESD file to extracted_esd directory since DISM needs the original file
+                mkdir extracted_esd -ErrorAction SilentlyContinue
+                Copy-Item $esdFile.FullName -Destination "extracted_esd\install.esd"
                 
                 cd extracted_esd
                 if (Test-Path "install.esd") {
@@ -214,7 +212,7 @@ jobs:
                         throw "Temporary WIM file was not created"
                     }
                 } else {
-                    throw "install.esd not found after extraction"
+                    throw "install.esd not found after copying"
                 }
             } else {
                 throw "ESD file path does not exist: $($esdFile.FullName)"
@@ -295,10 +293,9 @@ jobs:
             Write-Host "Found ESD file: $($esdFile.Name)"
             
             if (Test-Path $esdFile.FullName) {
-                7z x "$($esdFile.FullName)" -oextracted_esd
-                if ($LASTEXITCODE -ne 0) {
-                    throw "Failed to extract ESD file"
-                }
+                # Copy the ESD file to extracted_esd directory since DISM needs the original file
+                mkdir extracted_esd -ErrorAction SilentlyContinue
+                Copy-Item $esdFile.FullName -Destination "extracted_esd\install.esd"
                 
                 cd extracted_esd
                 if (Test-Path "install.esd") {
@@ -320,7 +317,7 @@ jobs:
                         throw "Temporary WIM file was not created"
                     }
                 } else {
-                    throw "install.esd not found after extraction"
+                    throw "install.esd not found after copying"
                 }
             } else {
                 throw "ESD file path does not exist: $($esdFile.FullName)"
