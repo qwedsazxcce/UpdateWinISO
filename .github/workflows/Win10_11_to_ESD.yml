@@ -1,483 +1,194 @@
-name: Windows10_11_LTSC_ESD (Resumable)
+# 第一层：固定Workflow名称
+name: Windows_10-11_ESD
 
+# 触发方式：仅手动触发（避免误执行）
 on:
   workflow_dispatch:
 
+# 第二层：环境变量（集中管理可替换配置）
 env:
-  # Basic encoding config
-  PYTHONIOENCODING: utf-8
-  LC_ALL: C.UTF-8
-  LANG: C.UTF-8
-  # Target file names
-  TARGET_WIM: Windows10_LTSC2021_32&64.wim
-  TARGET_ESD: Windows10_LTSC2021_32&64.esd
-  RELEASE_TAG: Windows10_LTSC2021_32&64
-  # Win10/11 package URLs + image indexes (replace with your actual URLs)
-  URLS_WIN10_X86: >
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows10x86LTSC2021-26.1.15/install_Windows10x86LTSC2021-26.1.15.7z.001,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows10x86LTSC2021-26.1.15/install_Windows10x86LTSC2021-26.1.15.7z.002,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows10x86LTSC2021-26.1.15/install_Windows10x86LTSC2021-26.1.15.7z.003
-  IMG_INDEX_WIN10_X86: 5
-  URLS_WIN10_X64: >
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows10x64LTSC2021-26.1.15/install_Windows10x64LTSC2021-26.1.15.7z.001,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows10x64LTSC2021-26.1.15/install_Windows10x64LTSC2021-26.1.15.7z.002,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows10x64LTSC2021-26.1.15/install_Windows10x64LTSC2021-26.1.15.7z.003
-  IMG_INDEX_WIN10_X64: 4
-  URLS_WIN11_X64: >
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows11x64LTSC2024-26.1.15/install_Windows11x64LTSC2024-26.1.15.7z.001,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows11x64LTSC2024-26.1.15/install_Windows11x64LTSC2024-26.1.15.7z.002
-  IMG_INDEX_WIN11_X64: 1
+  # 核心文件名（纯英文避免编码问题，替换原&符号）
+  TARGET_WIM: Windows10_LTSC_2021_32_64_Windows_11_LTSC_2025.wim
+  TARGET_ESD: Windows10_LTSC_2021_32_64_Windows_11_LTSC_2025.esd
+  RELEASE_TAG: Windows10_LTSC_2021_32_64_Windows_11_LTSC_2025
+  # 分卷大小（严格1950M）
+  SPLIT_SIZE: 1950M
+  # Artifact保留天数
+  RETENTION_DAYS: 3
 
+  # 下载地址 - Win10 x86 LTSC2021 7z分卷
+  WIN10_X86_VOL1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
+  WIN10_X86_VOL2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
+  
+  # 下载地址 - Win10 x64 LTSC2021 7z分卷
+  WIN10_X64_VOL1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001
+  WIN10_X64_VOL2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002
+  WIN10_X64_VOL3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
+  
+  # 下载地址 - Win11 x64 LTSC2024 7z分卷
+  WIN11_X64_VOL1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001
+  WIN11_X64_VOL2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
+  WIN11_X64_VOL3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
+
+# 第三层：实际执行代码
 jobs:
-  build-wim:
+  build_and_release:
     runs-on: windows-latest
-    timeout-minutes: 180
+    defaults:
+      run:
+        shell: cmd
+        # 工作目录（纯英文绝对路径，规避空格/编码问题）
+        working-directory: ${{ github.workspace }}\win_build
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Force Global UTF8 Encoding
-        shell: powershell
+      # 步骤1：初始化工作环境
+      - name: Initialize working environment
         run: |
-          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::UTF8
-          [Console]::InputEncoding = [System.Text.UTF8Encoding]::UTF8
-          $PSDefaultParameterValues['*:Encoding'] = 'utf8'
-          [System.Globalization.CultureInfo]::CurrentCulture = 'en-US'
-          [System.Globalization.CultureInfo]::CurrentUICulture = 'en-US'
-          Write-Host "UTF8 encoding enabled successfully"
+          echo "=== Initializing build environment ==="
+          # 创建工作目录（多级目录避免冲突）
+          mkdir ${{ github.workspace }}\win_build
+          mkdir ${{ github.workspace }}\win_build\temp
+          # 验证7z和DISM可用性（基础工具检查）
+          7z --version
+          dism /? > nul
+          echo "Environment initialized successfully"
 
-      - name: Install 7-Zip
-        shell: powershell
+      # 步骤2：处理Win10 x86 LTSC2021
+      - name: Process Win10 x86 LTSC2021
         run: |
-          $7zPath = "C:\Program Files\7-Zip\7z.exe"
-          if (-not (Test-Path $7zPath)) {
-              Write-Host "Installing 7-Zip..."
-              choco install 7zip -y --no-progress --ignore-checksums --force
-          }
-          if (-not (Test-Path $7zPath)) { throw "7-Zip installation failed" }
-          $env:PATH += ";C:\Program Files\7-Zip"
-          Write-Host "7-Zip installed successfully: $7zPath"
+          echo "=== Processing Win10 x86 LTSC2021 ==="
+          # 下载7z分卷（curl显示实时进度+下载速度）
+          echo "Downloading 7z volumes..."
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN10_X86_VOL1 }}
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN10_X86_VOL2 }}
+          
+          # 解压7z分卷（自动识别后续分卷，-y自动确认覆盖）
+          echo "Extracting 7z volumes..."
+          7z x -y "Windows10_LTSC2021_x86-19044.6811.7z.001" -o"./temp"
+          
+          # 提取ISO中的install.esd（遍历temp目录找ISO）
+          echo "Extracting install.esd from ISO..."
+          for /r "./temp" %%f in (*.iso) do (
+            7z x -y "%%f" -o"./temp/esd" "sources/install.esd"
+          )
+          
+          # 导出第一个映像到WIM（首次创建WIM）
+          echo "Exporting first image to WIM..."
+          dism /export-image /sourceimagefile:"./temp/esd/sources/install.esd" /sourceindex:1 /destinationimagefile:"${{ env.TARGET_WIM }}" /compress:max /checkintegrity
+          
+          # 清理临时文件（节约空间）
+          echo "Cleaning temporary files..."
+          del /f /q "Windows10_LTSC2021_x86-19044.6811.7z.*"
+          rmdir /s /q "./temp"
+          mkdir ./temp
+          echo "Win10 x86 LTSC2021 processed successfully"
 
-      - name: Build Target WIM (Download -> Extract -> Export Images)
-        shell: powershell
+      # 步骤3：处理Win10 x64 LTSC2021
+      - name: Process Win10 x64 LTSC2021
         run: |
-          function Process-7z-Export-Image {
-              param(
-                  [string]$UrlCsv,
-                  [int]$ImageIndex,
-                  [string]$VolumeName,
-                  [string]$TargetWim
-              )
+          echo "=== Processing Win10 x64 LTSC2021 ==="
+          # 下载7z分卷
+          echo "Downloading 7z volumes..."
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN10_X64_VOL1 }}
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN10_X64_VOL2 }}
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN10_X64_VOL3 }}
+          
+          # 解压7z分卷
+          echo "Extracting 7z volumes..."
+          7z x -y "Windows10_LTSC2021_amd64-19044.6811.7z.001" -o"./temp"
+          
+          # 提取ISO中的install.esd
+          echo "Extracting install.esd from ISO..."
+          for /r "./temp" %%f in (*.iso) do (
+            7z x -y "%%f" -o"./temp/esd" "sources/install.esd"
+          )
+          
+          # 追加第一个映像到现有WIM
+          echo "Appending first image to WIM..."
+          dism /export-image /sourceimagefile:"./temp/esd/sources/install.esd" /sourceindex:1 /destinationimagefile:"${{ env.TARGET_WIM }}" /compress:max /checkintegrity
+          
+          # 清理临时文件
+          echo "Cleaning temporary files..."
+          del /f /q "Windows10_LTSC2021_amd64-19044.6811.7z.*"
+          rmdir /s /q "./temp"
+          mkdir ./temp
+          echo "Win10 x64 LTSC2021 processed successfully"
 
-              Write-Host "`n====================================="
-              Write-Host "Processing: $VolumeName (Image Index: $ImageIndex)"
-              Write-Host "====================================="
-
-              # Clean old temp files
-              $tempRoot = "$env:GITHUB_WORKSPACE\temp_$VolumeName"
-              if (Test-Path $tempRoot) {
-                  Write-Host "Cleaning old temp directory: $tempRoot"
-                  Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
-              }
-
-              # Create temp directories
-              $dlDir = New-Item -Path "$tempRoot\downloads" -ItemType Directory -Force
-              $extractDir = New-Item -Path "$tempRoot\extract" -ItemType Directory -Force
-              Write-Host "Temp directory created: $tempRoot"
-
-              try {
-                  # Split and clean URLs
-                  $urls = $UrlCsv -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-                  if ($urls.Count -eq 0) { throw "Empty URL list for $VolumeName" }
-                  Write-Host "Downloading $($urls.Count) volumes..."
-
-                  # Download all volumes with timeout and retry
-                  foreach ($url in $urls) {
-                      $fileName = [System.IO.Path]::GetFileName($url)
-                      $savePath = Join-Path -Path $dlDir.FullName -ChildPath $fileName
-                      
-                      Write-Host "Downloading: $fileName -> $savePath"
-                      curl.exe --progress-bar -L -f -o "$savePath" "$url" --max-time 300 --retry 3
-                      
-                      # Validate download
-                      if (-not (Test-Path $savePath)) {
-                          throw "Download failed: $fileName not found at $savePath"
-                      }
-                      $fileSize = (Get-Item $savePath).Length
-                      if ($fileSize -lt 1024) {
-                          throw "Download failed: $fileName is empty (size: $fileSize bytes)"
-                      }
-                      $fileSizeGB = [math]::Round($fileSize/1GB,2)
-                      Write-Host "Download completed: $fileName ($fileSizeGB GB)"
-                  }
-
-                  # Find 7z.001 volume
-                  Write-Host "Finding 7z.001 volume in: $($dlDir.FullName)"
-                  $7z001Files = Get-ChildItem -Path $dlDir.FullName -Filter "*.7z.001"
-                  if ($7z001Files.Count -eq 0) {
-                      Write-Host "7z.001 volume not found! Download directory content:"
-                      Get-ChildItem -Path $dlDir.FullName | ForEach-Object { 
-                          Write-Host " - $($_.FullName) (size: $([math]::Round($_.Length/1GB,2)) GB)" 
-                      }
-                      throw "7z.001 volume not found for $VolumeName"
-                  }
-                  $7z001 = $7z001Files | Select-Object -First 1
-                  $7z001Path = $7z001.FullName
-                  Write-Host "Extracting 7z volume: $7z001Path"
-                  
-                  # Extract 7z volume
-                  & "C:\Program Files\7-Zip\7z.exe" x -y -bb1 -o"$($extractDir.FullName)" "$7z001Path"
-                  if ($LASTEXITCODE -ne 0) { throw "7z extraction failed (exit code: $LASTEXITCODE)" }
-                  Write-Host "Extraction completed to: $($extractDir.FullName)"
-
-                  # Find WIM file
-                  Write-Host "Finding WIM file in extract directory..."
-                  $wimFiles = Get-ChildItem -Path $extractDir.FullName -Filter "*.wim" -Recurse
-                  if ($wimFiles.Count -eq 0) {
-                      Write-Host "No WIM files found! Extract directory content:"
-                      Get-ChildItem -Path $extractDir.FullName -Recurse | ForEach-Object { 
-                          Write-Host " - $($_.FullName)" 
-                      }
-                      throw "WIM file not found for $VolumeName"
-                  }
-                  $sourceWim = $wimFiles | Select-Object -First 1
-                  Write-Host "Source WIM file found: $($sourceWim.FullName)"
-
-                  # Export specified image to target WIM
-                  Write-Host "Exporting image $ImageIndex to $TargetWim..."
-                  if (-not (Test-Path $TargetWim)) {
-                      dism /Export-Image `
-                          /SourceImageFile:"$($sourceWim.FullName)" `
-                          /SourceIndex:$ImageIndex `
-                          /DestinationImageFile:"$TargetWim" `
-                          /Compress:max `
-                          /CheckIntegrity
-                  } else {
-                      dism /Export-Image `
-                          /SourceImageFile:"$($sourceWim.FullName)" `
-                          /SourceIndex:$ImageIndex `
-                          /DestinationImageFile:"$TargetWim" `
-                          /Compress:max `
-                          /CheckIntegrity
-                  }
-                  
-                  if ($LASTEXITCODE -ne 0) { throw "DISM export failed (exit code: $LASTEXITCODE)" }
-                  Write-Host "Image $ImageIndex exported to $TargetWim successfully"
-
-              } catch {
-                  Write-Host "Processing failed: $_" -ForegroundColor Red
-                  throw $_
-              } finally {
-                  # Clean temp files
-                  Write-Host "Deleting temp directory: $tempRoot"
-                  Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
-                  Write-Host "Temp files cleaned successfully"
-              }
-          }
-
-          # Process Win10/11 packages
-          $finalWim = "$env:GITHUB_WORKSPACE\$env:TARGET_WIM"
-
-          # Process Win10 x86 LTSC2021 (Index 5)
-          Process-7z-Export-Image `
-              -UrlCsv $env:URLS_WIN10_X86 `
-              -ImageIndex $env:IMG_INDEX_WIN10_X86 `
-              -VolumeName "Windows10x86LTSC2021" `
-              -TargetWim $finalWim
-
-          # Process Win10 x64 LTSC2021 (Index 4)
-          Process-7z-Export-Image `
-              -UrlCsv $env:URLS_WIN10_X64 `
-              -ImageIndex $env:IMG_INDEX_WIN10_X64 `
-              -VolumeName "Windows10x64LTSC2021" `
-              -TargetWim $finalWim
-
-          # Process Win11 x64 LTSC2024 (Index 1)
-          Process-7z-Export-Image `
-              -UrlCsv $env:URLS_WIN11_X64 `
-              -ImageIndex $env:IMG_INDEX_WIN11_X64 `
-              -VolumeName "Windows11x64LTSC2024" `
-              -TargetWim $finalWim
-
-          # Validate final WIM
-          if (-not (Test-Path $finalWim) -or (Get-Item $finalWim).Length -lt 1024) {
-              throw "Final WIM file is empty or missing"
-          }
-          $wimSize = [math]::Round((Get-Item $finalWim).Length/1GB,2)
-          Write-Host "Final WIM file created successfully!"
-          Write-Host "File path: $finalWim"
-          Write-Host "File size: $wimSize GB"
-
-          # Clean leftover temp directories
-          $allTempDirs = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "temp_*" -Directory
-          foreach ($dir in $allTempDirs) {
-              Write-Host "Cleaning leftover temp directory: $($dir.FullName)"
-              Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-          }
-
-      # Show WIM upload info
-      - name: Show WIM Upload Info
-        shell: powershell
+      # 步骤4：处理Win11 x64 LTSC2024
+      - name: Process Win11 x64 LTSC2024
         run: |
-          Write-Host "`nPreparing to upload WIM to Artifact..."
-          $wimPath = "${{ env.TARGET_WIM }}"
-          $wimSize = [math]::Round((Get-Item $wimPath).Length/1GB,2)
-          Write-Host "File path: $wimPath"
-          Write-Host "File size: $wimSize GB"
-          Write-Host "Artifact name: windows10-11-target-wim"
+          echo "=== Processing Win11 x64 LTSC2024 ==="
+          # 下载7z分卷
+          echo "Downloading 7z volumes..."
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN11_X64_VOL1 }}
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN11_X64_VOL2 }}
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN11_X64_VOL3 }}
+          
+          # 解压7z分卷
+          echo "Extracting 7z volumes..."
+          7z x -y "Windows11_LTSC2024_amd64-26200.7627.7z.001" -o"./temp"
+          
+          # 提取ISO中的install.esd
+          echo "Extracting install.esd from ISO..."
+          for /r "./temp" %%f in (*.iso) do (
+            7z x -y "%%f" -o"./temp/esd" "sources/install.esd"
+          )
+          
+          # 追加第一个映像到现有WIM
+          echo "Appending first image to WIM..."
+          dism /export-image /sourceimagefile:"./temp/esd/sources/install.esd" /sourceindex:1 /destinationimagefile:"${{ env.TARGET_WIM }}" /compress:max /checkintegrity
+          
+          # 清理临时文件
+          echo "Cleaning temporary files..."
+          del /f /q "Windows11_LTSC2024_amd64-26200.7627.7z.*"
+          rmdir /s /q "./temp"
+          echo "Win11 x64 LTSC2024 processed successfully"
 
-      - name: Upload WIM Artifact
+      # 步骤5：转换WIM到高压缩ESD
+      - name: Convert WIM to high-compression ESD
+        run: |
+          echo "=== Converting WIM to ESD (recovery compression) ==="
+          # /compress:recovery 是ESD最高压缩级别
+          dism /export-image /sourceimagefile:"${{ env.TARGET_WIM }}" /sourceindex:all /destinationimagefile:"${{ env.TARGET_ESD }}" /compress:recovery /checkintegrity
+          echo "ESD conversion completed"
+
+      # 步骤6：1950M分卷压缩ESD
+      - name: Split ESD to 1950M volumes
+        run: |
+          echo "=== Splitting ESD to ${{ env.SPLIT_SIZE }} volumes ==="
+          # 7z分卷压缩：-v指定分卷大小，-t7z指定格式，-mx=9最高压缩
+          7z a -t7z -mx=9 -v${{ env.SPLIT_SIZE }} "${{ env.TARGET_ESD }}.7z" "${{ env.TARGET_ESD }}"
+          echo "Volume splitting completed"
+
+      # 步骤7：上传Artifact（防丢，保留3天）
+      - name: Upload WIM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows10-11-target-wim
-          path: ${{ env.TARGET_WIM }}
-          retention-days: 90
-        env:
-          ACTIONS_STEP_DEBUG: true
+          name: ${{ env.TARGET_WIM }}
+          path: ${{ github.workspace }}\win_build\${{ env.TARGET_WIM }}
+          retention-days: ${{ env.RETENTION_DAYS }}
 
-  build-esd:
-    needs: build-wim
-    runs-on: windows-latest
-    timeout-minutes: 90
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Show WIM Download Info
-        shell: powershell
-        run: |
-          Write-Host "Preparing to download WIM Artifact..."
-          $wimPath = "${{ github.workspace }}\${{ env.TARGET_WIM }}"
-          Write-Host "Expected WIM path: $wimPath"
-
-      - name: Download WIM Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: windows10-11-target-wim
-          path: ${{ github.workspace }}
-
-      - name: Verify WIM Download
-        shell: powershell
-        run: |
-          $wimPath = "${{ github.workspace }}\${{ env.TARGET_WIM }}"
-          if (-not (Test-Path $wimPath)) { throw "WIM Artifact not found: $wimPath" }
-          Write-Host "WIM downloaded successfully: $wimPath"
-
-      - name: Enable UTF8 Encoding
-        shell: powershell
-        run: |
-          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::UTF8
-          Write-Host "UTF8 encoding enabled successfully"
-
-      - name: Convert WIM to ESD (High Compression)
-        shell: powershell
-        run: |
-          $finalWim = "$env:GITHUB_WORKSPACE\$env:TARGET_WIM"
-          $finalEsd = "$env:GITHUB_WORKSPACE\$env:TARGET_ESD"
-
-          # Get image count from WIM
-          Write-Host "Getting image count from WIM..."
-          $env:DISM_OUTPUT_LANGUAGE = "en-US"
-          $dismOutput = dism /Get-WimInfo /WimFile:$finalWim 2>&1 | Out-String
-          $imgMatches = [regex]::Matches($dismOutput, 'Index\s*\:\s*(\d+)')
-          $imgTotal = $imgMatches.Count
-          
-          if ($imgTotal -eq 0) {
-              Write-Host "No image count found, fallback to export index 1-3"
-              $imgTotal = 3
-          }
-          Write-Host "Found $imgTotal images in WIM"
-
-          # Convert all images to ESD (Recovery compression)
-          Write-Host "Converting WIM to ESD (Recovery compression)..."
-          for ($i=1; $i -le $imgTotal; $i++) {
-              Write-Host "Exporting image $i/$imgTotal to ESD..."
-              dism /Export-Image `
-                  /SourceImageFile:$finalWim `
-                  /SourceIndex:$i `
-                  /DestinationImageFile:$finalEsd `
-                  /Compress:recovery `
-                  /CheckIntegrity
-              
-              if ($LASTEXITCODE -ne 0) { throw "ESD export failed (image $i, exit code: $LASTEXITCODE)" }
-              Write-Host "Image $i exported to ESD successfully"
-          }
-
-          # Validate ESD file
-          if (-not (Test-Path $finalEsd) -or (Get-Item $finalEsd).Length -lt 1024) {
-              throw "Final ESD file is empty or missing"
-          }
-          $esdSize = [math]::Round((Get-Item $finalEsd).Length/1GB,2)
-          Write-Host "ESD file created successfully!"
-          Write-Host "File path: $finalEsd"
-          Write-Host "File size: $esdSize GB"
-
-          # Delete source WIM
-          Write-Host "Deleting source WIM file..."
-          Remove-Item -Path $finalWim -Force -ErrorAction SilentlyContinue
-          Write-Host "WIM file deleted successfully"
-
-      # Show ESD upload info
-      - name: Show ESD Upload Info
-        shell: powershell
-        run: |
-          Write-Host "`nPreparing to upload ESD to Artifact..."
-          $esdPath = "${{ github.workspace }}\${{ env.TARGET_ESD }}"
-          $esdSize = [math]::Round((Get-Item $esdPath).Length/1GB,2)
-          Write-Host "File path: $esdPath"
-          Write-Host "File size: $esdSize GB"
-          Write-Host "Artifact name: windows10-11-target-esd"
-
-      - name: Upload ESD Artifact
+      - name: Upload ESD artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows10-11-target-esd
-          path: ${{ env.TARGET_ESD }}
-          retention-days: 90
+          name: ${{ env.TARGET_ESD }}
+          path: ${{ github.workspace }}\win_build\${{ env.TARGET_ESD }}
+          retention-days: ${{ env.RETENTION_DAYS }}
 
-  split-esd:
-    needs: build-esd
-    runs-on: windows-latest
-    timeout-minutes: 60
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Show ESD Download Info
-        shell: powershell
-        run: |
-          Write-Host "Preparing to download ESD Artifact..."
-          $esdPath = "${{ github.workspace }}\${{ env.TARGET_ESD }}"
-          Write-Host "Expected ESD path: $esdPath"
-
-      - name: Download ESD Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: windows10-11-target-esd
-          path: ${{ github.workspace }}
-
-      - name: Verify ESD Download
-        shell: powershell
-        run: |
-          $esdPath = "${{ github.workspace }}\${{ env.TARGET_ESD }}"
-          if (-not (Test-Path $esdPath)) { throw "ESD Artifact not found: $esdPath" }
-          $esdSize = [math]::Round((Get-Item $esdPath).Length/1GB,2)
-          Write-Host "ESD downloaded successfully: $esdPath ($esdSize GB)"
-
-      - name: Install 7-Zip
-        shell: powershell
-        run: |
-          $7zPath = "C:\Program Files\7-Zip\7z.exe"
-          if (-not (Test-Path $7zPath)) {
-              Write-Host "Installing 7-Zip..."
-              choco install 7zip -y --no-progress --ignore-checksums --force
-          }
-          if (-not (Test-Path $7zPath)) { throw "7-Zip installation failed" }
-          Write-Host "7-Zip installed successfully: $7zPath"
-
-      - name: Split ESD to 1950M Volumes
-        shell: powershell
-        run: |
-          $esdFile = "$env:GITHUB_WORKSPACE\$env:TARGET_ESD"
-          $7zPath = "C:\Program Files\7-Zip\7z.exe"
-          $splitOutput = "$esdFile.7z"
-
-          # Validate ESD exists
-          if (-not (Test-Path $esdFile)) { throw "ESD file not found: $esdFile" }
-
-          # Split ESD into 1950M volumes
-          Write-Host "Splitting ESD into 1950M volumes..."
-          Write-Host "Command: $7zPath a -y -mx=9 -v1950M ""$splitOutput"" ""$esdFile"""
-          & $7zPath a -y -mx=9 -v1950M "$splitOutput" "$esdFile"
-          
-          if ($LASTEXITCODE -ne 0) { throw "7z split failed (exit code: $LASTEXITCODE)" }
-
-          # Validate split files
-          $splitFiles = Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Filter "$($env:TARGET_ESD).7z.*" | Sort-Object Name
-          if ($splitFiles.Count -eq 0) { throw "No split files created" }
-          
-          Write-Host "Split completed successfully!"
-          Write-Host "Total volumes: $($splitFiles.Count)"
-          foreach ($file in $splitFiles) {
-              $fileSize = [math]::Round($file.Length/1GB,2)
-              Write-Host " - $($file.Name): $fileSize GB"
-          }
-
-          # Delete source ESD
-          Write-Host "Deleting source ESD file..."
-          Remove-Item -Path $esdFile -Force -ErrorAction SilentlyContinue
-          Write-Host "ESD file deleted successfully"
-
-      # Show split volumes upload info
-      - name: Show Split Volumes Upload Info
-        shell: powershell
-        run: |
-          Write-Host "`nPreparing to upload split volumes to Artifact..."
-          $splitFiles = Get-ChildItem -Path "${{ github.workspace }}" -Filter "${{ env.TARGET_ESD }}.7z.*"
-          Write-Host "Number of volumes to upload: $($splitFiles.Count)"
-
-      - name: Upload Split Volumes
+      - name: Upload split volumes artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows10-11-split-volumes
-          path: ${{ github.workspace }}/${{ env.TARGET_ESD }}.7z.*
-          retention-days: 90
+          name: ${{ env.TARGET_ESD }}_volumes
+          path: ${{ github.workspace }}\win_build\${{ env.TARGET_ESD }}.7z.*
+          retention-days: ${{ env.RETENTION_DAYS }}
 
-  publish-release:
-    needs: split-esd
-    runs-on: windows-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Show Split Volumes Download Info
-        shell: powershell
-        run: |
-          Write-Host "Preparing to download split volumes..."
-          $splitPattern = "${{ env.TARGET_ESD }}.7z.*"
-          Write-Host "Expected split pattern: $splitPattern"
-
-      - name: Download Split Volumes
-        uses: actions/download-artifact@v4
-        with:
-          name: windows10-11-split-volumes
-          path: ${{ github.workspace }}
-
-      - name: Verify Split Volumes
-        shell: powershell
-        run: |
-          $splitFiles = Get-ChildItem -Path "${{ github.workspace }}" -Filter "${{ env.TARGET_ESD }}.7z.*"
-          if ($splitFiles.Count -eq 0) { throw "Split volumes not found" }
-          Write-Host "Split volumes downloaded successfully, count: $($splitFiles.Count)"
-
-      - name: Publish to GitHub Releases
-        uses: softprops/action-gh-release@v2
+      # 步骤8：发布分卷成果到GitHub Releases（仅最终分卷）
+      - name: Release split volumes to GitHub Releases
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_TAG }}
-          files: ${{ github.workspace }}/${{ env.TARGET_ESD }}.7z.*
-          draft: false
-          prerelease: false
-          body: |
-            # Windows10_LTSC2021_32&64 + Windows11_LTSC2024
-            - ESD file split into 1950M volumes for easy transfer
-            - Included images:
-              - Windows10x86LTSC2021 (Index 5)
-              - Windows10x64LTSC2021 (Index 4)
-              - Windows11x64LTSC2024 (Index 1)
-            - Compression: Recovery (highest compression ratio)
+          files: ${{ github.workspace }}\win_build\${{ env.TARGET_ESD }}.7z.*
+          # 覆盖同名Tag（如需保留历史版本可删除此行）
+          overwrite: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Final cleanup
-      - name: Final Cleanup
-        if: always()
-        shell: powershell
-        run: |
-          Write-Host "Performing final cleanup..."
-          $tempDirs = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "temp_*" -Directory
-          foreach ($dir in $tempDirs) {
-              Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-          }
-          Write-Host "All temp files cleaned successfully!"
-          Write-Host "Workflow completed successfully!"
