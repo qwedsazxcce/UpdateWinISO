@@ -12,7 +12,7 @@ env:
   WIN11_AMD64_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
   WIN11_AMD64_URL_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
 
-"on":
+on:
   workflow_dispatch:
   push:
     branches: [ main ]
@@ -22,6 +22,8 @@ env:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -128,8 +130,8 @@ jobs:
                 cd extracted_esd
                 if (Test-Path "install.esd") {
                     # Export first image to new WIM file
-                    $destWim = "..\..\..\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
-                    dism /Export-Image /SourceImageFile:install.esd /SourceIndex:1 /DestinationImageFile:$destWim /Compress:max
+                    $destWim = "..\..\..\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
+                    dism /Export-Image /SourceImageFile:install.esd /SourceIndex:1 /DestinationImageFile:"$destWim" /Compress:max
                     if ($LASTEXITCODE -ne 0) {
                         throw "Failed to export WIM image"
                     }
@@ -151,8 +153,8 @@ jobs:
         Remove-Item Windows10_LTSC2021_x86.7z.002 -Force
         Remove-Item Windows10_LTSC2021_x86.7z.003 -Force
         Remove-Item Windows10_x86 -Recurse -Force
-        $wimFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
-        if (Test-Path $wimFile) {
+        $wimFile = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
+        if (Test-Path "$wimFile") {
             Write-Host "Initial WIM created successfully"
         }
         
@@ -237,8 +239,8 @@ jobs:
                     # Verify temporary WIM was created
                     if (Test-Path "install.wim") {
                         # Append to existing WIM file
-                        $destWim = "..\..\..\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
-                        dism /Export-Image /SourceImageFile:install.wim /SourceIndex:1 /DestinationImageFile:$destWim /DestinationName:"Windows 10 LTSC 2021 amd64" /Compress:max
+                        $destWim = "..\..\..\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
+                        dism /Export-Image /SourceImageFile:install.wim /SourceIndex:1 /DestinationImageFile:"$destWim" /DestinationName:"Windows 10 LTSC 2021 amd64" /Compress:max
                         if ($LASTEXITCODE -ne 0) {
                             throw "Failed to append WIM image"
                         }
@@ -346,8 +348,8 @@ jobs:
                     # Verify temporary WIM was created
                     if (Test-Path "install.wim") {
                         # Append to existing WIM file
-                        $destWim = "..\..\..\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
-                        dism /Export-Image /SourceImageFile:install.wim /SourceIndex:1 /DestinationImageFile:$destWim /DestinationName:"Windows 11 LTSC 2024 amd64" /Compress:max
+                        $destWim = "..\..\..\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
+                        dism /Export-Image /SourceImageFile:install.wim /SourceIndex:1 /DestinationImageFile:"$destWim" /DestinationName:"Windows 11 LTSC 2024 amd64" /Compress:max
                         if ($LASTEXITCODE -ne 0) {
                             throw "Failed to append WIM image"
                         }
@@ -379,23 +381,24 @@ jobs:
       run: |
         cd workdir
         # Verify source WIM file exists
-        $wimFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
-        if (-not (Test-Path $wimFile)) {
+        $wimFile = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
+        if (-not (Test-Path "$wimFile")) {
             throw "Source WIM file not found"
         }
         
         Write-Host "Converting WIM to ESD with maximum compression..."
-        $esdFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
+        $esdFile = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
         
         # First check how many images are in the WIM file
         Write-Host "Checking WIM file info..."
-        $wimInfo = dism /Get-WimInfo /WimFile:$wimFile
+        dism /Get-WimInfo /WimFile:"$wimFile"
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to get WIM info"
         }
         
         # Parse the WIM info to get image count
         # Look for lines containing "Index :" to count images
+        $wimInfo = dism /Get-WimInfo /WimFile:"$wimFile"
         $wimInfoLines = $wimInfo -split "`n"
         $imageCount = ($wimInfoLines | Where-Object { $_ -match "Index\s*:\s*\d+" }).Count
         
@@ -413,10 +416,10 @@ jobs:
             
             if ($i -eq 1) {
                 # First image: create new ESD file
-                dism /Export-Image /SourceImageFile:$wimFile /SourceIndex:$i /DestinationImageFile:$esdFile /Compress:recovery /CheckIntegrity
+                dism /Export-Image /SourceImageFile:"$wimFile" /SourceIndex:$i /DestinationImageFile:"$esdFile" /Compress:recovery /CheckIntegrity
             } else {
                 # Subsequent images: append to existing ESD file
-                dism /Export-Image /SourceImageFile:$wimFile /SourceIndex:$i /DestinationImageFile:$esdFile /Compress:recovery /CheckIntegrity
+                dism /Export-Image /SourceImageFile:"$wimFile" /SourceIndex:$i /DestinationImageFile:"$esdFile" /Compress:recovery /CheckIntegrity
             }
             
             if ($LASTEXITCODE -ne 0) {
@@ -427,9 +430,9 @@ jobs:
         Write-Host "Successfully exported all $imageCount images to ESD format"
         
         # Verify ESD file was created
-        if (Test-Path $esdFile) {
+        if (Test-Path "$esdFile") {
             Write-Host "Successfully converted to ESD format"
-            $esdSize = (Get-Item $esdFile).Length
+            $esdSize = (Get-Item "$esdFile").Length
             Write-Host "ESD file size: $($esdSize / 1GB) GB"
         } else {
             throw "ESD file was not created"
@@ -439,26 +442,26 @@ jobs:
       run: |
         cd workdir
         # Verify ESD file exists before splitting
-        $esdFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
-        if (-not (Test-Path $esdFile)) {
+        $esdFile = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
+        if (-not (Test-Path "$esdFile")) {
             throw "ESD file not found for splitting"
         }
         
         Write-Host "Splitting ESD file into 1950MB volumes..."
-        $outputArchive = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.7z"
-        7z a -v1950M $outputArchive $esdFile
+        $outputArchive = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z"
+        7z a -v1950M "$outputArchive" "$esdFile"
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to split ESD file"
         }
         
         Write-Host "Verifying split archive integrity..."
-        7z t $outputArchive.001
+        7z t "$outputArchive.001"
         if ($LASTEXITCODE -ne 0) {
             throw "Split archive integrity check failed"
         }
         
         # Verify split files were created
-        $splitFiles = Get-ChildItem -Path . -Filter "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.7z.*"
+        $splitFiles = Get-ChildItem -Path . -Filter "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z.*"
         if ($splitFiles -and $splitFiles.Count -gt 0) {
             Write-Host "Created $($splitFiles.Count) volume files:"
             foreach ($file in $splitFiles) {
@@ -467,40 +470,54 @@ jobs:
         } else {
             throw "No split volume files were created"
         }
-        
-    # Delete existing release and tag if they exist
+
+    # ========== 删除Release/Tag步骤 ==========
     - name: Delete existing release and tag
+      shell: pwsh
       run: |
-        # Check if release exists and delete it
-        $releaseExists = gh release view Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025 --json id --jq ".id" 2>$null
-        if ($releaseExists) {
-            Write-Host "Deleting existing release Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025"
-            gh release delete Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025 --cleanup-tag --yes
-        } else {
-            Write-Host "No existing release found, proceeding..."
-        }
+        $targetName = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025"
         
-        # Check if tag exists and delete it
-        $tagExists = git ls-remote --tags origin Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025 2>$null
-        if ($tagExists) {
-            Write-Host "Deleting existing tag Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025"
-            git push origin --delete refs/tags/Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025
-        } else {
-            Write-Host "No existing tag found, proceeding..."
+        # 检查并删除Release
+        try {
+            $releaseId = gh release view "$targetName" --json id --jq ".id" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Found existing release: $targetName, deleting..."
+                gh release delete "$targetName" --cleanup-tag --yes
+            } else {
+                Write-Host "No existing release found for: $targetName"
+            }
+        }
+        catch {
+            Write-Host "No existing release found for: $targetName (error: $_)"
+        }
+
+        # 兜底检查并删除Tag
+        try {
+            git ls-remote --tags origin "refs/tags/$targetName" 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Found existing tag: $targetName, deleting..."
+                git push origin --delete "refs/tags/$targetName"
+            } else {
+                Write-Host "No existing tag found for: $targetName"
+            }
+        }
+        catch {
+            Write-Host "No existing tag found for: $targetName (error: $_)"
         }
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # ========== 上传Release资产步骤（修改为通用匹配） ==========
     - name: Upload release assets
       uses: softprops/action-gh-release@v1
       with:
         name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
         tag_name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
         files: |
-          workdir/*.7z.*
+          workdir/*.7z.*  # 改为通用匹配：匹配workdir下所有.7z.开头的分片文件
         draft: false
         prerelease: false
         make_latest: true
-        overwrite: false  # Now set to false since we've already deleted the previous release
+        overwrite: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
