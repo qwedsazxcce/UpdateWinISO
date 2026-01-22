@@ -32,7 +32,7 @@ env:
   WIN11_X64_VOL2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
   WIN11_X64_VOL3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
 
-# 第三层：PowerShell版执行代码（修复curl参数问题）
+# 第三层：PowerShell版执行代码（修复DISM错误87）
 jobs:
   build_and_release:
     runs-on: windows-latest
@@ -63,14 +63,14 @@ jobs:
             exit 1
           }
 
-      # 步骤2：处理Win10 x86 LTSC2021（修复curl为curl.exe）
+      # 步骤2：处理Win10 x86 LTSC2021
       - name: Process Win10 x86 LTSC2021
         run: |
           Write-Host "=== Processing Win10 x86 LTSC2021 ==="
           # 切换到工作目录
           Set-Location $env:WORK_DIR
           
-          # 下载7z分卷（调用原生curl.exe，支持进度+速度参数）
+          # 下载7z分卷（调用原生curl.exe）
           Write-Host "Downloading 7z volumes..."
           curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X86_VOL1
           curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X86_VOL2
@@ -81,11 +81,11 @@ jobs:
             exit 1
           }
           
-          # 解压7z分卷（自动识别后续分卷）
+          # 解压7z分卷
           Write-Host "Extracting 7z volumes..."
           7z x -y "Windows10_LTSC2021_x86-19044.6811.7z.001" -o".\temp" | Out-Null
           
-          # 提取ISO中的install.esd（PowerShell遍历ISO文件）
+          # 提取ISO中的install.esd
           Write-Host "Extracting install.esd from ISO..."
           $isoFile = Get-ChildItem -Path .\temp -Filter *.iso -Recurse -File | Select-Object -First 1
           if ($isoFile) {
@@ -102,16 +102,17 @@ jobs:
             exit 1
           }
           
-          # 导出第一个映像到WIM（首次创建）
+          # 导出第一个映像到WIM（首次创建，单行命令避免参数解析错误）
           Write-Host "Exporting first image to WIM..."
-          dism /export-image `
-            /sourceimagefile:".\temp\esd\sources\install.esd" `
-            /sourceindex:1 `
-            /destinationimagefile:$env:TARGET_WIM `
-            /compress:max `
-            /checkintegrity
+          dism /export-image /sourceimagefile:".\temp\esd\sources\install.esd" /sourceindex:1 /destinationimagefile:$env:TARGET_WIM /compress:max /checkintegrity
           
-          # 清理临时文件（-ErrorAction SilentlyContinue：文件不存在则不报错）
+          # 验证WIM是否创建成功
+          if (-not (Test-Path $env:TARGET_WIM)) {
+            Write-Error "Win10 x86 WIM export failed!"
+            exit 1
+          }
+          
+          # 清理临时文件
           Write-Host "Cleaning temporary files..."
           Remove-Item -Path "Windows10_LTSC2021_x86-19044.6811.7z.*" -Force -ErrorAction SilentlyContinue
           Remove-Item -Path .\temp -Recurse -Force -ErrorAction SilentlyContinue
@@ -119,13 +120,13 @@ jobs:
           
           Write-Host "Win10 x86 LTSC2021 processed successfully"
 
-      # 步骤3：处理Win10 x64 LTSC2021（修复curl为curl.exe）
+      # 步骤3：处理Win10 x64 LTSC2021
       - name: Process Win10 x64 LTSC2021
         run: |
           Write-Host "=== Processing Win10 x64 LTSC2021 ==="
           Set-Location $env:WORK_DIR
           
-          # 下载7z分卷（原生curl.exe）
+          # 下载7z分卷
           Write-Host "Downloading 7z volumes..."
           curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X64_VOL1
           curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X64_VOL2
@@ -158,14 +159,15 @@ jobs:
             exit 1
           }
           
-          # 追加第一个映像到现有WIM
+          # 追加第一个映像到现有WIM（单行命令）
           Write-Host "Appending first image to WIM..."
-          dism /export-image `
-            /sourceimagefile:".\temp\esd\sources\install.esd" `
-            /sourceindex:1 `
-            /destinationimagefile:$env:TARGET_WIM `
-            /compress:max `
-            /checkintegrity
+          dism /export-image /sourceimagefile:".\temp\esd\sources\install.esd" /sourceindex:1 /destinationimagefile:$env:TARGET_WIM /compress:max /checkintegrity
+          
+          # 验证WIM是否更新成功
+          if (-not (Test-Path $env:TARGET_WIM)) {
+            Write-Error "Win10 x64 WIM append failed!"
+            exit 1
+          }
           
           # 清理临时文件
           Write-Host "Cleaning temporary files..."
@@ -175,13 +177,13 @@ jobs:
           
           Write-Host "Win10 x64 LTSC2021 processed successfully"
 
-      # 步骤4：处理Win11 x64 LTSC2024（修复curl为curl.exe）
+      # 步骤4：处理Win11 x64 LTSC2024
       - name: Process Win11 x64 LTSC2024
         run: |
           Write-Host "=== Processing Win11 x64 LTSC2024 ==="
           Set-Location $env:WORK_DIR
           
-          # 下载7z分卷（原生curl.exe）
+          # 下载7z分卷
           Write-Host "Downloading 7z volumes..."
           curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN11_X64_VOL1
           curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN11_X64_VOL2
@@ -214,14 +216,15 @@ jobs:
             exit 1
           }
           
-          # 追加第一个映像到现有WIM
+          # 追加第一个映像到现有WIM（单行命令）
           Write-Host "Appending first image to WIM..."
-          dism /export-image `
-            /sourceimagefile:".\temp\esd\sources\install.esd" `
-            /sourceindex:1 `
-            /destinationimagefile:$env:TARGET_WIM `
-            /compress:max `
-            /checkintegrity
+          dism /export-image /sourceimagefile:".\temp\esd\sources\install.esd" /sourceindex:1 /destinationimagefile:$env:TARGET_WIM /compress:max /checkintegrity
+          
+          # 验证WIM是否更新成功
+          if (-not (Test-Path $env:TARGET_WIM)) {
+            Write-Error "Win11 x64 WIM append failed!"
+            exit 1
+          }
           
           # 清理临时文件
           Write-Host "Cleaning temporary files..."
@@ -230,27 +233,43 @@ jobs:
           
           Write-Host "Win11 x64 LTSC2024 processed successfully"
 
-      # 步骤5：转换WIM到高压缩ESD
+      # 步骤5：转换WIM到高压缩ESD（核心修复：解决错误87）
       - name: Convert WIM to high-compression ESD
         run: |
           Write-Host "=== Converting WIM to ESD (recovery compression) ==="
           Set-Location $env:WORK_DIR
           
-          # 验证WIM文件存在
+          # 1. 验证WIM文件存在且有效
           if (-not (Test-Path $env:TARGET_WIM)) {
-            Write-Error "Target WIM file not found!"
+            Write-Error "Target WIM file not found! Path: $env:TARGET_WIM"
             exit 1
           }
           
-          # 高压缩转换为ESD（recovery级别是ESD最高压缩）
-          dism /export-image `
-            /sourceimagefile:$env:TARGET_WIM `
-            /sourceindex:all `
-            /destinationimagefile:$env:TARGET_ESD `
-            /compress:recovery `
-            /checkintegrity
+          # 2. 检查WIM映像信息（确认源WIM有效）
+          Write-Host "Checking WIM image integrity..."
+          dism /get-imageinfo /imagefile:$env:TARGET_WIM
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Source WIM file is corrupted! Exit code: $LASTEXITCODE"
+            exit 1
+          }
           
-          Write-Host "ESD conversion completed"
+          # 3. 修复DISM命令：单行执行，参数格式严格符合要求（错误87核心修复）
+          Write-Host "Starting ESD conversion..."
+          dism /export-image /sourceimagefile:$env:TARGET_WIM /sourceindex:all /destinationimagefile:$env:TARGET_ESD /compress:recovery /checkintegrity /format:esd
+          
+          # 4. 检查转换结果
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "ESD conversion failed! DISM exit code: $LASTEXITCODE"
+            exit 1
+          }
+          
+          # 5. 验证ESD文件生成
+          if (-not (Test-Path $env:TARGET_ESD)) {
+            Write-Error "ESD file not generated after conversion!"
+            exit 1
+          }
+          
+          Write-Host "ESD conversion completed successfully"
 
       # 步骤6：1950M分卷压缩ESD
       - name: Split ESD to 1950M volumes
@@ -264,8 +283,14 @@ jobs:
             exit 1
           }
           
-          # 7z分卷压缩（-mx=9最高压缩，-v指定分卷大小）
+          # 7z分卷压缩（单行命令）
           7z a -t7z -mx=9 -v$env:SPLIT_SIZE "$env:TARGET_ESD.7z" $env:TARGET_ESD | Out-Null
+          
+          # 验证分卷生成
+          if (-not (Test-Path "$env:TARGET_ESD.7z.001")) {
+            Write-Error "ESD volume splitting failed!"
+            exit 1
+          }
           
           Write-Host "Volume splitting completed"
 
@@ -298,6 +323,6 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_TAG }}
           files: ${{ env.WORK_DIR }}\${{ env.TARGET_ESD }}.7z.*
-          overwrite: true # 覆盖同名Tag（如需保留历史版本可删除）
+          overwrite: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
