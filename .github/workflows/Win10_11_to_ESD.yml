@@ -1,5 +1,17 @@
 name: Windows_10-11_ESD
 
+# 核心新增：定义工作流触发条件（解决 No event triggers defined 错误）
+on:
+  # 手动触发（最推荐，在GitHub页面手动点击运行）
+  workflow_dispatch:
+  # 可选：代码推送到main分支时触发（如需自动触发可保留，不需要则删除）
+  # push:
+  #   branches: [ main ]
+  # 可选：定时触发（每天UTC时间0点执行，如需定时则保留，不需要则删除）
+  # schedule:
+  #   - cron: '0 0 * * *'
+
+
 # 环境变量：集中管理下载链接和关键文件名，方便后续替换
 env:
   # 核心目标文件名
