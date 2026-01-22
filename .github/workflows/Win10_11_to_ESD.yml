@@ -2,212 +2,139 @@ name: Windows_10-11_ESD
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 0 1 * *'
-
-env:
-  WIN10_X86_URL_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
-  WIN10_X86_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
-  WIN10_X64_URL_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001
-  WIN10_X64_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002
-  WIN10_X64_URL_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
-  WIN11_X64_URL_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001
-  WIN11_X64_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
-  WIN11_X64_URL_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
-  OUTPUT_NAME: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
 
 jobs:
   build:
     runs-on: windows-latest
-    
     steps:
-      - name: Setup PowerShell Encoding
-        shell: powershell
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::ASCII
-          $OutputEncoding = [System.Text.Encoding]::ASCII
-          $env:LANG = 'en_US.UTF-8'
-          Write-Output 'Encoding set to ASCII'
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Create Workspace
-        shell: powershell
+      - name: Run PowerShell script
+        shell: pwsh
+        env:
+          # Environment variables for download URLs
+          WIN10_X86_URL_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
+          WIN10_X86_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
+          WIN10_X64_URL_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001
+          WIN10_X64_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002
+          WIN10_X64_URL_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
+          WIN11_X64_URL_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001
+          WIN11_X64_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
+          WIN11_X64_URL_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
         run: |
-          New-Item -ItemType Directory -Path 'D:\workspace' -Force | Out-Null
-          Set-Location 'D:\workspace'
-          Write-Output "Workspace: $(Get-Location)"
+          # Actual code
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"  # Avoid PowerShell progress bars interfering with curl
 
-      - name: Download Win10 x86
-        shell: powershell
-        working-directory: D:\workspace
-        run: |
-          Write-Output 'Downloading Win10 x86 part 1...'
-          curl.exe -L -# '${{ env.WIN10_X86_URL_001 }}' -o win10_x86.7z.001
-          Write-Output 'Downloading Win10 x86 part 2...'
-          curl.exe -L -# '${{ env.WIN10_X86_URL_002 }}' -o win10_x86.7z.002
-
-      - name: Extract Win10 x86
-        shell: powershell
-        working-directory: D:\workspace
-        run: |
-          & 'C:\Program Files\7-Zip\7z.exe' x -y -t7z -o. win10_x86.7z.*.001
-          Write-Output 'Win10 x86 7z extracted'
-          Remove-Item -Path 'win10_x86.7z.*' -Force
-          Write-Output 'Win10 x86 7z deleted'
-
-      - name: Mount and Export Win10 x86
-        shell: powershell
-        working-directory: D:\workspace
-        run: |
-          $iso = Get-ChildItem -Path . -Filter '*.iso' | Select-Object -First 1
-          Write-Output "ISO file: $($iso.Name)"
-          & 'C:\Program Files\7-Zip\7z.exe' x -y -o"install_esd_temp" "$($iso.FullName)" sources\install.esd
-          Write-Output 'install.esd extracted from ISO'
-          $esdFile = Join-Path 'install_esd_temp' 'install.esd'
-          & 'C:\Program Files\7-Zip\7z.exe' x -y -o"esd_content" "$esdFile" 1
-          Remove-Item -Path "$($iso.FullName)" -Force
-          Remove-Item -Path 'install_esd_temp' -Recurse -Force
-          Copy-Item -Path 'esd_content\1' -Destination '${{ env.OUTPUT_NAME }}.wim' -Force
-          Remove-Item -Path 'esd_content' -Recurse -Force
-          Write-Output 'Win10 x86 image exported to WIM'
-
-      - name: Download Win10 x64
-        shell: powershell
-        working-directory: D:\workspace
-        run: |
-          Write-Output 'Downloading Win10 x64 part 1...'
-          curl.exe -L -# '${{ env.WIN10_X64_URL_001 }}' -o win10_x64.7z.001
-          Write-Output 'Downloading Win10 x64 part 2...'
-          curl.exe -L -# '${{ env.WIN10_X64_URL_002 }}' -o win10_x64.7z.002
-          Write-Output 'Downloading Win10 x64 part 3...'
-          curl.exe -L -# '${{ env.WIN10_X64_URL_003 }}' -o win10_x64.7z.003
-
-      - name: Extract Win10 x64
-        shell: powershell
-        working-directory: D:\workspace
-        run: |
-          & 'C:\Program Files\7-Zip\7z.exe' x -y -t7z -o. win10_x64.7z.*.001
-          Write-Output 'Win10 x64 7z extracted'
-          Remove-Item -Path 'win10_x64.7z.*' -Force
-          Write-Output 'Win10 x64 7z deleted'
-
-      - name: Mount and Export Win10 x64
-        shell: powershell
-        working-directory: D:\workspace
-        run: |
-          $iso = Get-ChildItem -Path . -Filter '*.iso' | Select-Object -First 1
-          Write-Output "ISO file: $($iso.Name)"
-          & 'C:\Program Files\7-Zip\7z.exe' x -y -o"install_esd_temp" "$($iso.FullName)" sources\install.esd
-          Write-Output 'install.esd extracted from ISO'
-          $esdFile = Join-Path 'install_esd_temp' 'install.esd'
-          & 'C:\Program Files\7-Zip\7z.exe' x -y -o"esd_content" "$esdFile" 1
-          Remove-Item -Path "$($iso.FullName)" -Force
-          Remove-Item -Path 'install_esd_temp' -Recurse -Force
-          & 'C:\Program Files\7-Zip\7z.exe' x -y -o"esd_extracted" '${{ env.OUTPUT_NAME }}.wim' 1
-          Copy-Item -Path 'esd_content\1' -Destination '${{ env.OUTPUT_NAME }}_temp.wim' -Force
-          & 'C:\Program Files\7-Zip\7z.exe' a -tzip '${{ env.OUTPUT_NAME }}.wim' '${{ env.OUTPUT_NAME }}_temp.wim'
-          Remove-Item -Path '${{ env.OUTPUT_NAME }}_temp.wim' -Force
-          Remove-Item -Path 'esd_content' -Recurse -Force
-          Remove-Item -Path 'esd_extracted' -Recurse -Force
-          Write-Output 'Win10 x64 image appended to WIM'
-
-      - name: Download Win11 x64
-        shell: powershell
-        working-directory: D:\workspace
-        run: |
-          Write-Output 'Downloading Win11 x64 part 1...'
-          curl.exe -L -# '${{ env.WIN11_X64_URL_001 }}' -o win11_x64.7z.001
-          Write-Output 'Downloading Win11 x64 part 2...'
-          curl.exe -L -# '${{ env.WIN11_X64_URL_002 }}' -o win11_x64.7z.002
-          Write-Output 'Downloading Win11 x64 part 3...'
-          curl.exe -L -# '${{ env.WIN11_X64_URL_003 }}' -o win11_x64.7z.003
-
-      - name: Extract Win11 x64
-        shell: powershell
-        working-directory: D:\workspace
-        run: |
-          & 'C:\Program Files\7-Zip\7z.exe' x -y -t7z -o. win11_x64.7z.*.001
-          Write-Output 'Win11 x64 7z extracted'
-          Remove-Item -Path 'win11_x64.7z.*' -Force
-          Write-Output 'Win11 x64 7z deleted'
-
-      - name: Mount and Export Win11 x64
-        shell: powershell
-        working-directory: D:\workspace
-        run: |
-          $iso = Get-ChildItem -Path . -Filter '*.iso' | Select-Object -First 1
-          Write-Output "ISO file: $($iso.Name)"
-          & 'C:\Program Files\7-Zip\7z.exe' x -y -o"install_esd_temp" "$($iso.FullName)" sources\install.esd
-          Write-Output 'install.esd extracted from ISO'
-          $esdFile = Join-Path 'install_esd_temp' 'install.esd'
-          & 'C:\Program Files\7-Zip\7z.exe' x -y -o"esd_content" "$esdFile" 1
-          Remove-Item -Path "$($iso.FullName)" -Force
-          Remove-Item -Path 'install_esd_temp' -Recurse -Force
-          & 'C:\Program Files\7-Zip\7z.exe' x -y -o"esd_extracted" '${{ env.OUTPUT_NAME }}.wim' 1
-          Copy-Item -Path 'esd_content\1' -Destination '${{ env.OUTPUT_NAME }}_temp.wim' -Force
-          & 'C:\Program Files\7-Zip\7z.exe' a -tzip '${{ env.OUTPUT_NAME }}.wim' '${{ env.OUTPUT_NAME }}_temp.wim'
-          Remove-Item -Path '${{ env.OUTPUT_NAME }}_temp.wim' -Force
-          Remove-Item -Path 'esd_content' -Recurse -Force
-          Remove-Item -Path 'esd_extracted' -Recurse -Force
-          Write-Output 'Win11 x64 image appended to WIM'
-
-      - name: Convert WIM to ESD
-        shell: powershell
-        working-directory: D:\workspace
-        run: |
-          dism /Export-Image /SourceImageFile:'${{ env.OUTPUT_NAME }}.wim' /SourceIndex:1 /DestinationImageFile:'${{ env.OUTPUT_NAME }}.esd' /Compress:Recovery
-          Write-Output 'WIM converted to ESD'
-          Remove-Item -Path '${{ env.OUTPUT_NAME }}.wim' -Force
-          Write-Output 'WIM deleted'
-
-      - name: Split ESD into Volumes
-        shell: powershell
-        working-directory: D:\workspace
-        run: |
-          $size = 1950MB
-          $esd = Get-Item '${{ env.OUTPUT_NAME }}.esd'
-          $totalSize = $esd.Length
-          $partNumber = 1
-          $bytesRead = 0
-          $bufferSize = 10MB
-          $buffer = New-Object byte[] $bufferSize
-          $fileStream = [System.IO.File]::OpenRead($esd.FullName)
-          
-          while ($bytesRead -lt $totalSize) {
-            $partFileName = "${{ env.OUTPUT_NAME }}.esd.$partNumber"
-            $remainingBytes = [Math]::Min($size, $totalSize - $bytesRead)
-            $bytesToWrite = $remainingBytes
-            
-            $partStream = [System.IO.File]::OpenWrite((Join-Path $pwd $partFileName))
-            
-            while ($bytesToWrite -gt 0) {
-              $readSize = [Math]::Min($bufferSize, $bytesToWrite)
-              $readBytes = $fileStream.Read($buffer, 0, $readSize)
-              if ($readBytes -eq 0) { break }
-              $partStream.Write($buffer, 0, $readBytes)
-              $bytesToWrite -= $readBytes
-              $bytesRead += $readBytes
-            }
-            
-            $partStream.Close()
-            $percent = [Math]::Round(($bytesRead / $totalSize) * 100, 2)
-            Write-Output "Created $partFileName ($percent%)"
-            $partNumber++
+          # Function to download with curl
+          function Download-File {
+              param([string]$Url, [string]$Output)
+              Write-Host "Downloading $Url to $Output"
+              curl.exe -L -o "$Output" "$Url" --progress-bar
           }
-          
-          $fileStream.Close()
-          Write-Output 'ESD split completed'
 
-      - name: Release to GitHub
+          # Function to extract 7z
+          function Extract-7z {
+              param([string]$Archive)
+              Write-Host "Extracting $Archive"
+              & "C:\Program Files\7-Zip\7z.exe" x "$Archive" -y
+          }
+
+          # Function to mount ISO and get install.esd path
+          function Get-InstallEsdPath {
+              param([string]$IsoPath)
+              $mount = Mount-DiskImage -ImagePath "$IsoPath" -PassThru
+              $driveLetter = ($mount | Get-Volume).DriveLetter
+              $esdPath = "${driveLetter}:\sources\install.esd"
+              return $esdPath, $mount
+          }
+
+          # Function to extract image to WIM
+          function Extract-Image {
+              param([string]$EsdPath, [string]$WimPath, [bool]$Append = $false)
+              if ($Append) {
+                  dism /export-image /sourceimagefile:"$EsdPath" /sourceindex:1 /destinationimagefile:"$WimPath" /append
+              } else {
+                  dism /export-image /sourceimagefile:"$EsdPath" /sourceindex:1 /destinationimagefile:"$WimPath"
+              }
+          }
+
+          # Function to unmount ISO
+          function Unmount-Iso {
+              param($Mount)
+              Dismount-DiskImage -ImagePath $Mount.ImagePath
+          }
+
+          # Function to clean up temp files
+          function Clean-Temp {
+              param([string[]]$Files)
+              foreach ($file in $Files) {
+                  if (Test-Path $file) { Remove-Item $file -Force -Recurse }
+              }
+          }
+
+          # Set working directory
+          Set-Location $env:GITHUB_WORKSPACE
+
+          # Output WIM path
+          $wimPath = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
+
+          # Process Win10 x86
+          Write-Host "Processing Windows 10 LTSC 2021 x86"
+          Download-File $env:WIN10_X86_URL_001 "win10_x86.7z.001"
+          Download-File $env:WIN10_X86_URL_002 "win10_x86.7z.002"
+          Extract-7z "win10_x86.7z.001"
+          $isoPath = Get-ChildItem -Filter "*.iso" | Select-Object -First 1 -ExpandProperty FullName
+          $esdPath, $mount = Get-InstallEsdPath $isoPath
+          Extract-Image $esdPath $wimPath
+          Unmount-Iso $mount
+          Clean-Temp @("win10_x86.7z.001", "win10_x86.7z.002", $isoPath, $esdPath)
+
+          # Process Win10 x64
+          Write-Host "Processing Windows 10 LTSC 2021 x64"
+          Download-File $env:WIN10_X64_URL_001 "win10_x64.7z.001"
+          Download-File $env:WIN10_X64_URL_002 "win10_x64.7z.002"
+          Download-File $env:WIN10_X64_URL_003 "win10_x64.7z.003"
+          Extract-7z "win10_x64.7z.001"
+          $isoPath = Get-ChildItem -Filter "*.iso" | Select-Object -First 1 -ExpandProperty FullName
+          $esdPath, $mount = Get-InstallEsdPath $isoPath
+          Extract-Image $esdPath $wimPath $true
+          Unmount-Iso $mount
+          Clean-Temp @("win10_x64.7z.001", "win10_x64.7z.002", "win10_x64.7z.003", $isoPath, $esdPath)
+
+          # Process Win11 x64
+          Write-Host "Processing Windows 11 LTSC 2024 x64"
+          Download-File $env:WIN11_X64_URL_001 "win11_x64.7z.001"
+          Download-File $env:WIN11_X64_URL_002 "win11_x64.7z.002"
+          Download-File $env:WIN11_X64_URL_003 "win11_x64.7z.003"
+          Extract-7z "win11_x64.7z.001"
+          $isoPath = Get-ChildItem -Filter "*.iso" | Select-Object -First 1 -ExpandProperty FullName
+          $esdPath, $mount = Get-InstallEsdPath $isoPath
+          Extract-Image $esdPath $wimPath $true
+          Unmount-Iso $mount
+          Clean-Temp @("win11_x64.7z.001", "win11_x64.7z.002", "win11_x64.7z.003", $isoPath, $esdPath)
+
+          # Convert WIM to ESD
+          Write-Host "Converting WIM to ESD"
+          $esdPath = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
+          dism /export-image /sourceimagefile:"$wimPath" /sourceindex:* /destinationimagefile:"$esdPath" /compress:recovery
+          Remove-Item $wimPath -Force
+
+          # Split ESD into 1950M volumes
+          Write-Host "Splitting ESD into 1950M volumes"
+          & "C:\Program Files\7-Zip\7z.exe" a -v1950m "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z" "$esdPath"
+
+          # Clean up ESD
+          Remove-Item $esdPath -Force
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ env.OUTPUT_NAME }}
-          name: ${{ env.OUTPUT_NAME }}
-          files: |
-            D:\workspace\${{ env.OUTPUT_NAME }}.esd.*
-          body: |
-            Windows 10 LTSC 2021 (32-bit & 64-bit) + Windows 11 LTSC 2024 ESD
-            High compression, 1950MB volumes
-          draft: false
-          prerelease: false
+          repository: qwedsazxcce/Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
+          tag_name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
+          name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
+          files: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z.*
+          token: ${{ secrets.GITHUB_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
