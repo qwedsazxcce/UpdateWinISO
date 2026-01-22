@@ -1,4 +1,4 @@
-name: Windows_10-11_ESD
+name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
 
 env:
   # Download URL environment variables - for easy replacement later
@@ -467,6 +467,10 @@ jobs:
         name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
         tag_name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
         files: |
-          workdir/Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.7z.*
+          workdir/*.7z.*
+        draft: false
+        prerelease: false
+        make_latest: true
+        overwrite: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
