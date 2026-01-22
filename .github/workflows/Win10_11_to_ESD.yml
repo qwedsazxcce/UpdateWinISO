@@ -132,7 +132,7 @@ jobs:
                 throw "Could not determine drive letter for mounted ISO: $($isoFile.FullName)"
             }
             
-            Write-Output "ISO mounted successfully on drive $driveLetter:"
+            Write-Output "ISO mounted successfully on drive ${driveLetter}:"
             
             # Copy sources\install.esd to working directory
             $sourceEsd = "${driveLetter}:\sources\install.esd"
@@ -270,7 +270,7 @@ jobs:
                 throw "Could not determine drive letter for mounted ISO: $($isoFile.FullName)"
             }
                     
-            Write-Output "ISO mounted successfully on drive $driveLetter:"
+            Write-Output "ISO mounted successfully on drive ${driveLetter}:"
                     
             # Copy sources\install.esd to working directory
             $sourceEsd = "${driveLetter}:\sources\install.esd"
@@ -409,7 +409,7 @@ jobs:
                 throw "Could not determine drive letter for mounted ISO: $($isoFile.FullName)"
             }
                     
-            Write-Output "ISO mounted successfully on drive $driveLetter:"
+            Write-Output "ISO mounted successfully on drive ${driveLetter}:"
                     
             # Copy sources\install.esd to working directory
             $sourceEsd = "${driveLetter}:\sources\install.esd"
@@ -611,7 +611,7 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         name: Windows10_LTSC_2021_32_and_64_Windows_11_LTSC_2025
-        tag_name: v1.0.0
+        tag_name: Windows10_LTSC_2021_32_and_64_Windows_11_LTSC_2025
         draft: false
         prerelease: false
         files: |
