@@ -1,320 +1,346 @@
-name: Win10_11_to_ESD
-<#
-Win10/11 LTSC 映像合并发布脚本
-核心功能：7z分卷下载→解压→WIM合并→ESD转换→分卷→GitHub Releases发布
-特性：纯英文日志、实时下载进度、逐源清理临时文件、UTF-8编码规避非ASCII问题
-#>
+name: Windows_10-11_ESD
 
-# ====================== 第一层：固定名称配置 ======================
-$releaseName = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025"
-$targetWimName = "$releaseName.wim"
-$targetEsdName = "$releaseName.esd"
-$splitSize = "1950M"          # 分卷大小
-$artifactRetentionDays = 3    # Artifact保留天数
+on:
+  workflow_dispatch:
+  schedule:
+    # 设置定期运行（可选）
+    - cron: '0 0 1 * *'
 
-# ====================== 第二层：环境变量（下载地址，可直接替换） ======================
-$downloadSources = @(
-    @{
-        Name = "Win10_LTSC2021_x86"
-        Urls = @(
-            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001",
-            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002"
-        )
-    },
-    @{
-        Name = "Win10_LTSC2021_x64"
-        Urls = @(
-            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001",
-            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002",
-            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003"
-        )
-    },
-    @{
-        Name = "Win11_LTSC2024_x64"
-        Urls = @(
-            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001",
-            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002",
-            "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003"
-        )
-    }
-)
+env:
+  # 下载地址环境变量 - 便于以后替换
+  WIN10_X86_URL_1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
+  WIN10_X86_URL_2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
+  
+  WIN10_X64_URL_1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001
+  WIN10_X64_URL_2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002
+  WIN10_X64_URL_3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
+  
+  WIN11_X64_URL_1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001
+  WIN11_X64_URL_2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
+  WIN11_X64_URL_3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
+  
+  OUTPUT_WIM_NAME: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim
+  OUTPUT_ESD_NAME: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd
+  PART_SIZE: 1950M
 
-# ====================== 第三层：核心业务代码 ======================
-# 全局配置
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8  # 规避非ASCII编码问题
-$workDir = Join-Path -Path $PWD.Path -ChildPath "WinLTSC_WorkDir"
-$tempDir = Join-Path -Path $workDir -ChildPath "Temp"
-$outputDir = Join-Path -Path $workDir -ChildPath "Output"
-New-Item -ItemType Directory -Path $tempDir, $outputDir -Force | Out-Null
-$targetWimPath = Join-Path -Path $outputDir -ChildPath $targetWimName
-$targetEsdPath = Join-Path -Path $outputDir -ChildPath $targetEsdName
+jobs:
+  merge-images:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-# 1. 下载文件（原生curl，显示进度/速度）
-function Download-File {
-    param(
-        [string]$Url,
-        [string]$OutputPath
-    )
-    try {
-        Write-Host "`nDownloading: $Url" -ForegroundColor Cyan
-        & curl.exe -L -o $OutputPath -# $Url  # -# 显示进度条，原生curl确保速度/进度展示
-        if ($LASTEXITCODE -ne 0) { throw "Download failed (exit code: $LASTEXITCODE)" }
-        Write-Host "Download completed: $OutputPath" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Error downloading $Url : $_" -ForegroundColor Red
-        exit 1
-    }
-}
-
-# 2. 解压7z分卷（自动识别分卷，规避路径语法错误）
-function Extract-7zVolumes {
-    param(
-        [array]$7zFiles,
-        [string]$ExtractDir
-    )
-    try {
-        New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
-        Write-Host "`nExtracting 7z volumes to: $ExtractDir" -ForegroundColor Cyan
-        $first7z = $7zFiles | Sort-Object | Select-Object -First 1  # 7z只需指定第一个分卷即可解压全部
-        & 7z.exe x -y -o"$ExtractDir" "$first7z"  # -y 自动确认，-o指定输出目录（规避路径语法坑）
-        if ($LASTEXITCODE -ne 0) { throw "7z extraction failed (exit code: $LASTEXITCODE)" }
-        Write-Host "7z extraction completed" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Error extracting 7z: $_" -ForegroundColor Red
-        exit 1
-    }
-}
-
-# 3. 从ISO提取install.esd
-function Extract-InstallEsdFromIso {
-    param(
-        [string]$IsoPath,
-        [string]$OutputDir
-    )
-    try {
-        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
-        Write-Host "`nMounting ISO: $IsoPath" -ForegroundColor Cyan
-        $mount = Mount-DiskImage -ImagePath $IsoPath -PassThru
-        $drive = ($mount | Get-Volume | Get-Partition).DriveLetter + ":"
-        $esdSource = Join-Path -Path $drive -ChildPath "sources\install.esd"
-        $esdOutput = Join-Path -Path $OutputDir -ChildPath "install.esd"
-        
-        Copy-Item -Path $esdSource -Destination $esdOutput -Force
-        if (-not (Test-Path $esdOutput)) { throw "install.esd not found in ISO" }
-        
-        Dismount-DiskImage -ImagePath $IsoPath -Confirm:$false
-        Write-Host "Extracted install.esd: $esdOutput" -ForegroundColor Green
-        return $esdOutput
-    }
-    catch {
-        if ($mount) { Dismount-DiskImage -ImagePath $IsoPath -Confirm:$false -ErrorAction SilentlyContinue }
-        Write-Host "Error extracting ESD: $_" -ForegroundColor Red
-        exit 1
-    }
-}
-
-# 4. 合并映像到WIM（首次创建，后续追加）
-function Add-ImageToWim {
-    param(
-        [string]$EsdPath,
-        [string]$TargetWimPath,
-        [bool]$IsFirstImage
-    )
-    try {
-        Write-Host "`nProcessing image from ESD: $EsdPath" -ForegroundColor Cyan
-        # 验证ESD包含索引1的映像
-        & dism.exe /Get-ImageInfo /ImageFile:"$EsdPath" | Select-String "Image Index: 1" -ErrorAction Stop
-        
-        # 合并映像（首次创建，后续追加）
-        if ($IsFirstImage) {
-            & dism.exe /Export-Image /SourceImageFile:"$EsdPath" /SourceIndex:1 /DestinationImageFile:"$TargetWimPath" /Compress:max /CheckIntegrity
-        }
-        else {
-            & dism.exe /Export-Image /SourceImageFile:"$EsdPath" /SourceIndex:1 /DestinationImageFile:"$TargetWimPath" /Compress:max /CheckIntegrity /Append
-        }
-        
-        if ($LASTEXITCODE -ne 0) { throw "DISM merge failed (exit code: $LASTEXITCODE)" }
-        Write-Host "Image merged to WIM successfully" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Error merging image: $_" -ForegroundColor Red
-        exit 1
-    }
-}
-
-# 5. 清理临时文件（逐源清理，节省空间）
-function Cleanup-TempFiles {
-    param(
-        [array]$FilesToDelete
-    )
-    try {
-        Write-Host "`nCleaning temporary files..." -ForegroundColor Cyan
-        foreach ($file in $FilesToDelete) {
-            if (Test-Path $file) {
-                Remove-Item -Path $file -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Host "Deleted: $file" -ForegroundColor Yellow
-            }
-        }
-    }
-    catch { Write-Host "Warning: Cleanup error - $_" -ForegroundColor Yellow }
-}
-
-# 6. 转换WIM到高压缩ESD
-function Convert-WimToEsd {
-    param(
-        [string]$WimPath,
-        [string]$EsdPath
-    )
-    try {
-        Write-Host "`nConverting WIM to ESD (high compression)..." -ForegroundColor Cyan
-        # 获取WIM中的映像数量
-        $imageCount = (& dism.exe /Get-ImageInfo /ImageFile:"$WimPath" | Select-String "Image Index: (\d+)").Count
-        
-        # 转换第一个映像（创建ESD）
-        & dism.exe /Export-Image /SourceImageFile:"$WimPath" /SourceIndex:1 /DestinationImageFile:"$EsdPath" /Compress:recovery /CheckIntegrity
-        
-        # 追加剩余映像
-        for ($i=2; $i -le $imageCount; $i++) {
-            & dism.exe /Export-Image /SourceImageFile:"$WimPath" /SourceIndex:$i /DestinationImageFile:"$EsdPath" /Compress:recovery /CheckIntegrity /Append
-        }
-        
-        if ($LASTEXITCODE -ne 0) { throw "ESD conversion failed (exit code: $LASTEXITCODE)" }
-        Write-Host "WIM converted to ESD successfully" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Error converting ESD: $_" -ForegroundColor Red
-        exit 1
-    }
-}
-
-# 7. 1950M分卷压缩
-function Split-FileToVolumes {
-    param(
-        [string]$SourceFile,
-        [string]$OutputPrefix,
-        [string]$VolumeSize
-    )
-    try {
-        Write-Host "`nSplitting file to $VolumeSize volumes..." -ForegroundColor Cyan
-        & 7z.exe a -t7z -mx=9 -v$VolumeSize -y "$OutputPrefix.7z" "$SourceFile"  # -mx=9最高压缩，-v指定分卷大小
-        if ($LASTEXITCODE -ne 0) { throw "7z split failed (exit code: $LASTEXITCODE)" }
-        $splitFiles = Get-ChildItem -Path "$OutputPrefix.7z.*"
-        Write-Host "Split completed: $($splitFiles.Count) volumes created" -ForegroundColor Green
-        return $splitFiles.FullName
-    }
-    catch {
-        Write-Host "Error splitting file: $_" -ForegroundColor Red
-        exit 1
-    }
-}
-
-# 8. 发布到GitHub Releases（仅发布最终分卷）
-function Publish-GitHubRelease {
-    param(
-        [string]$ReleaseName,
-        [string]$Tag,
-        [array]$FilesToUpload,
-        [int]$RetentionDays
-    )
-    try {
-        Write-Host "`nPublishing to GitHub Releases..." -ForegroundColor Cyan
-        # 验证环境变量
-        if (-not $env:GITHUB_TOKEN) { throw "GITHUB_TOKEN not set" }
-        if (-not $env:GITHUB_REPOSITORY) { throw "GITHUB_REPOSITORY not set (e.g., owner/repo)" }
-        
-        # 构建请求头
-        $headers = @{
-            "Authorization" = "token $($env:GITHUB_TOKEN)"
-            "Accept" = "application/vnd.github.v3+json"
+    - name: Setup 7-Zip
+      run: |
+        # 7-Zip should be available on GitHub Actions Windows runners
+        Write-Output "Checking for 7-Zip..."
+        if (Get-Command 7z -ErrorAction SilentlyContinue) {
+          Write-Output "7-Zip found"
+          & 7z
+        } else {
+          Write-Output "Installing 7-Zip..."
+          choco install 7zip
         }
 
-        # 创建Release
-        $releaseBody = "Merged Win10 LTSC2021 (x86/x64) + Win11 LTSC2024 (x64) ESD, split into $splitSize volumes`nArtifact retention: $RetentionDays days"
-        $releaseData = @{
-            tag_name = $Tag
-            name = $ReleaseName
-            body = $releaseBody
-            draft = $false
-            prerelease = $false
-        } | ConvertTo-Json
+    - name: Setup DISM tools
+      run: |
+        Write-Output "DISM tools should be available on Windows runners"
+        dism /?
         
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$($env:GITHUB_REPOSITORY)/releases" -Method Post -Headers $headers -Body $releaseData -ContentType "application/json"
-        $uploadUrl = $release.upload_url -replace '\{.*\}', ''
+    - name: Create working directory
+      run: |
+        New-Item -ItemType Directory -Force -Path "$env:TEMP\merge_process"
+        Set-Location "$env:TEMP\merge_process"
+        Write-Output "Working directory: $(Get-Location)"
 
-        # 上传分卷文件（仅上传最终成果）
-        foreach ($file in $FilesToUpload) {
-            $fileName = [System.IO.Path]::GetFileName($file)
-            Write-Host "Uploading: $fileName" -ForegroundColor Cyan
-            $fileBytes = [System.IO.File]::ReadAllBytes($file)
-            Invoke-RestMethod -Uri "$uploadUrl?name=$fileName" -Method Post -Headers $headers -Body $fileBytes -ContentType "application/octet-stream"
-            Write-Host "Uploaded: $fileName" -ForegroundColor Green
+    # Process Win10 x86 LTSC 2021
+    - name: Download Win10 x86 7z parts
+      run: |
+        Set-Location "$env:TEMP\merge_process"
+        
+        Write-Output "Downloading Win10 x86 7z parts..."
+        
+        # Download first part
+        Write-Output "Downloading part 1..."
+        curl -L -o "Windows10_LTSC2021_x86-19044.6811.7z.001" "$env:WIN10_X86_URL_1"
+        
+        # Download second part
+        Write-Output "Downloading part 2..."
+        curl -L -o "Windows10_LTSC2021_x86-19044.6811.7z.002" "$env:WIN10_X86_URL_2"
+        
+        Write-Output "Download completed for Win10 x86"
+
+    - name: Extract Win10 x86 ISO and process
+      run: |
+        Set-Location "$env:TEMP\merge_process"
+        
+        Write-Output "Extracting Win10 x86 archive..."
+        & 7z x "Windows10_LTSC2021_x86-19044.6811.7z.001" -o"x86_extract"
+        
+        # Find the ISO file
+        $isoFile = Get-ChildItem -Path "x86_extract" -Filter "*.iso" | Select-Object -First 1
+        if ($null -eq $isoFile) {
+            throw "ISO file not found in x86 extraction"
+        }
+        
+        Write-Output "Found ISO: $($isoFile.FullName)"
+        
+        # Mount ISO to extract install.esd
+        $mountResult = Mount-DiskImage -ImagePath $isoFile.FullName -PassThru
+        $driveLetter = ($mountResult | Get-Volume).DriveLetter
+        
+        # Copy sources\install.esd to working directory
+        $sourceEsd = "${driveLetter}:\sources\install.esd"
+        if (Test-Path $sourceEsd) {
+            Write-Output "Copying install.esd from ISO..."
+            Copy-Item $sourceEsd -Destination "x86_install.esd"
+            
+            # Export first image from x86 install.esd to WIM (this creates the file)
+            Write-Output "Exporting first image from x86 install.esd..."
+            dism /Export-Image /SourceImageFile:"x86_install.esd" /SourceIndex:1 /DestinationImageFile:"$env:OUTPUT_WIM_NAME" /Compress:fast /CheckIntegrity
+                            
+            Write-Output "Successfully exported first image from x86 install.esd"
+        } else {
+            throw "install.esd not found in ISO sources folder"
+        }
+        
+        # Dismount ISO
+        Dismount-DiskImage -ImagePath $isoFile.FullName
+        
+        # Clean up temporary files
+        Write-Output "Cleaning up Win10 x86 temporary files..."
+        Remove-Item "Windows10_LTSC2021_x86-19044.6811.7z.001" -Force
+        Remove-Item "Windows10_LTSC2021_x86-19044.6811.7z.002" -Force
+        Remove-Item $isoFile.FullName -Force
+        Remove-Item "x86_install.esd" -Force
+        Remove-Item "x86_extract" -Recurse -Force
+
+    # Process Win10 x64 LTSC 2021
+    - name: Download Win10 x64 7z parts
+      run: |
+        Set-Location "$env:TEMP\merge_process"
+        
+        Write-Output "Downloading Win10 x64 7z parts..."
+        
+        # Download first part
+        Write-Output "Downloading part 1..."
+        curl -L -o "Windows10_LTSC2021_amd64-19044.6811.7z.001" "$env:WIN10_X64_URL_1"
+        
+        # Download second part
+        Write-Output "Downloading part 2..."
+        curl -L -o "Windows10_LTSC2021_amd64-19044.6811.7z.002" "$env:WIN10_X64_URL_2"
+        
+        # Download third part
+        Write-Output "Downloading part 3..."
+        curl -L -o "Windows10_LTSC2021_amd64-19044.6811.7z.003" "$env:WIN10_X64_URL_3"
+        
+        Write-Output "Download completed for Win10 x64"
+
+    - name: Extract Win10 x64 ISO and process
+      run: |
+        Set-Location "$env:TEMP\merge_process"
+        
+        Write-Output "Extracting Win10 x64 archive..."
+        & 7z x "Windows10_LTSC2021_amd64-19044.6811.7z.001" -o"x64_extract"
+        
+        # Find the ISO file
+        $isoFile = Get-ChildItem -Path "x64_extract" -Filter "*.iso" | Select-Object -First 1
+        if ($null -eq $isoFile) {
+            throw "ISO file not found in x64 extraction"
+        }
+        
+        Write-Output "Found ISO: $($isoFile.FullName)"
+        
+        # Mount ISO to extract install.esd
+        $mountResult = Mount-DiskImage -ImagePath $isoFile.FullName -PassThru
+        $driveLetter = ($mountResult | Get-Volume).DriveLetter
+        
+        # Copy sources\install.esd to working directory
+        $sourceEsd = "${driveLetter}:\sources\install.esd"
+        if (Test-Path $sourceEsd) {
+            Write-Output "Copying install.esd from ISO..."
+            Copy-Item $sourceEsd -Destination "x64_install.esd"
+            
+            # Export first image from x64 install.esd and append to existing WIM
+            Write-Output "Exporting first image from x64 install.esd and appending to existing WIM..."
+            dism /Export-Image /SourceImageFile:"x64_install.esd" /SourceIndex:1 /DestinationImageFile:"$env:OUTPUT_WIM_NAME" /Compress:fast /CheckIntegrity
+                    
+            Write-Output "Successfully exported and appended first image from x64 install.esd"
+        } else {
+            throw "install.esd not found in ISO sources folder"
+        }
+        
+        # Dismount ISO
+        Dismount-DiskImage -ImagePath $isoFile.FullName
+        
+        # Clean up temporary files
+        Write-Output "Cleaning up Win10 x64 temporary files..."
+        Remove-Item "Windows10_LTSC2021_amd64-19044.6811.7z.001" -Force
+        Remove-Item "Windows10_LTSC2021_amd64-19044.6811.7z.002" -Force
+        Remove-Item "Windows10_LTSC2021_amd64-19044.6811.7z.003" -Force
+        Remove-Item $isoFile.FullName -Force
+        Remove-Item "x64_install.esd" -Force
+        Remove-Item "x64_extract" -Recurse -Force
+
+    # Process Win11 x64 LTSC 2024
+    - name: Download Win11 x64 7z parts
+      run: |
+        Set-Location "$env:TEMP\merge_process"
+        
+        Write-Output "Downloading Win11 x64 7z parts..."
+        
+        # Download first part
+        Write-Output "Downloading part 1..."
+        curl -L -o "Windows11_LTSC2024_amd64-26200.7627.7z.001" "$env:WIN11_X64_URL_1"
+        
+        # Download second part
+        Write-Output "Downloading part 2..."
+        curl -L -o "Windows11_LTSC2024_amd64-26200.7627.7z.002" "$env:WIN11_X64_URL_2"
+        
+        # Download third part
+        Write-Output "Downloading part 3..."
+        curl -L -o "Windows11_LTSC2024_amd64-26200.7627.7z.003" "$env:WIN11_X64_URL_3"
+        
+        Write-Output "Download completed for Win11 x64"
+
+    - name: Extract Win11 x64 ISO and process
+      run: |
+        Set-Location "$env:TEMP\merge_process"
+        
+        Write-Output "Extracting Win11 x64 archive..."
+        & 7z x "Windows11_LTSC2024_amd64-26200.7627.7z.001" -o"win11_extract"
+        
+        # Find the ISO file
+        $isoFile = Get-ChildItem -Path "win11_extract" -Filter "*.iso" | Select-Object -First 1
+        if ($null -eq $isoFile) {
+            throw "ISO file not found in Win11 extraction"
+        }
+        
+        Write-Output "Found ISO: $($isoFile.FullName)"
+        
+        # Mount ISO to extract install.esd
+        $mountResult = Mount-DiskImage -ImagePath $isoFile.FullName -PassThru
+        $driveLetter = ($mountResult | Get-Volume).DriveLetter
+        
+        # Copy sources\install.esd to working directory
+        $sourceEsd = "${driveLetter}:\sources\install.esd"
+        if (Test-Path $sourceEsd) {
+            Write-Output "Copying install.esd from ISO..."
+            Copy-Item $sourceEsd -Destination "win11_install.esd"
+            
+            # Export first image from Win11 install.esd and append to existing WIM
+            Write-Output "Exporting first image from Win11 install.esd and appending to existing WIM..."
+            dism /Export-Image /SourceImageFile:"win11_install.esd" /SourceIndex:1 /DestinationImageFile:"$env:OUTPUT_WIM_NAME" /Compress:fast /CheckIntegrity
+                    
+            Write-Output "Successfully exported and appended first image from Win11 install.esd"
+        } else {
+            throw "install.esd not found in ISO sources folder"
+        }
+        
+        # Dismount ISO
+        Dismount-DiskImage -ImagePath $isoFile.FullName
+        
+        # Clean up temporary files
+        Write-Output "Cleaning up Win11 x64 temporary files..."
+        Remove-Item "Windows11_LTSC2024_amd64-26200.7627.7z.001" -Force
+        Remove-Item "Windows11_LTSC2024_amd64-26200.7627.7z.002" -Force
+        Remove-Item "Windows11_LTSC2024_amd64-26200.7627.7z.003" -Force
+        Remove-Item $isoFile.FullName -Force
+        Remove-Item "win11_install.esd" -Force
+        Remove-Item "win11_extract" -Recurse -Force
+
+    # Convert WIM to ESD
+    - name: Convert WIM to ESD with high compression
+      run: |
+        Set-Location "$env:TEMP\merge_process"
+        
+        Write-Output "Converting WIM to ESD with high compression..."
+        
+        # Get image information from the WIM file
+        $imageInfo = dism /Get-ImageInfo /ImageFile:"$env:OUTPUT_WIM_NAME"
+        $imageCount = 0
+        foreach ($line in $imageInfo) {
+          if ($line -match "Image Count:") {
+            $imageCount = [int]($line -split ":")[1].Trim()
+            break
+          }
+        }
+        
+        Write-Output "Found $imageCount images in WIM file, processing all..."
+        
+        # Process each image and export to ESD with maximum compression
+        for ($i = 1; $i -le $imageCount; $i++) {
+          if ($i -eq 1) {
+            # For the first image, create the ESD file
+            Write-Output "Processing image $i/$imageCount..."
+            dism /Export-Image /SourceImageFile:"$env:OUTPUT_WIM_NAME" /SourceIndex:$i /DestinationImageFile:"$env:OUTPUT_ESD_NAME" /Compress:max /CheckIntegrity
+          } else {
+            # For subsequent images, append to the existing ESD
+            Write-Output "Processing image $i/$imageCount..."
+            dism /Export-Image /SourceImageFile:"$env:OUTPUT_WIM_NAME" /SourceIndex:$i /DestinationImageFile:"$env:OUTPUT_ESD_NAME" /Compress:max /CheckIntegrity
+          }
+        }
+        
+        Write-Output "Successfully converted WIM to ESD with high compression"
+
+    # Verify generated ESD file
+    - name: Verify ESD file
+      run: |
+        Set-Location "$env:TEMP\merge_process"
+        
+        if (Test-Path "$env:OUTPUT_ESD_NAME") {
+          $esdSize = (Get-Item "$env:OUTPUT_ESD_NAME").Length
+          $esdSizeMB = [math]::Round($esdSize / 1MB, 2)
+          Write-Output "ESD file created successfully. Size: $esdSizeMB MB"
+          
+          # Show image information
+          dism /Get-ImageInfo /ImageFile:"$env:OUTPUT_ESD_NAME"
+        } else {
+          throw "ESD file was not created"
         }
 
-        # 提示Artifact保留期配置（GitHub Actions需配合workflow设置）
-        Write-Host "`nNote: Set artifact retention to $RetentionDays days in GitHub Actions workflow" -ForegroundColor Yellow
-        Write-Host "Release published: $($release.html_url)" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Error publishing release: $_" -ForegroundColor Red
-        exit 1
-    }
-}
+    # Split archive to 1950M parts
+    - name: Split ESD file to 1950M parts
+      run: |
+        Set-Location "$env:TEMP\merge_process"
+        
+        Write-Output "Splitting ESD file to ${env:PART_SIZE} parts..."
+        
+        # Use 7z to split the ESD file
+        & 7z a -v${env:PART_SIZE} -m0=lzma2 -mx=9 -ms=on "$env:OUTPUT_ESD_NAME.part" "$env:OUTPUT_ESD_NAME"
+        
+        Write-Output "Successfully split ESD file to ${env:PART_SIZE} parts"
 
-# ====================== 主执行流程 ======================
-$isFirstImage = $true  # 标记是否为第一个要合并的映像
-foreach ($source in $downloadSources) {
-    Write-Host "`n==================================================" -ForegroundColor Magenta
-    Write-Host "Processing: $($source.Name)" -ForegroundColor Magenta
-    Write-Host "==================================================" -ForegroundColor Magenta
+    # Cleanup original unsplit ESD file
+    - name: Cleanup original ESD file
+      run: |
+        Set-Location "$env:TEMP\merge_process"
+        
+        Write-Output "Removing original ESD file after splitting..."
+        Remove-Item "$env:OUTPUT_ESD_NAME" -Force
+        
+        Write-Output "Original ESD file removed. Keeping only split parts."
 
-    # 1. 下载7z分卷
-    $7zFiles = @()
-    foreach ($url in $source.Urls) {
-        $fileName = [System.IO.Path]::GetFileName($url)
-        $outputPath = Join-Path -Path $tempDir -ChildPath $fileName
-        Download-File -Url $url -OutputPath $outputPath
-        $7zFiles += $outputPath
-    }
+    # Display final file list
+    - name: List final files
+      run: |
+        Set-Location "$env:TEMP\merge_process"
+        
+        Write-Output "Final files:"
+        Get-ChildItem -Path . -Filter "$env:OUTPUT_ESD_NAME.part*" | ForEach-Object {
+          $sizeMB = [math]::Round($_.Length / 1MB, 2)
+          Write-Output "$($_.Name) - Size: $sizeMB MB"
+        }
 
-    # 2. 解压7z分卷
-    $7zExtractDir = Join-Path -Path $tempDir -ChildPath "$($source.Name)_7zExtract"
-    Extract-7zVolumes -7zFiles $7zFiles -ExtractDir $7zExtractDir
-
-    # 3. 找到ISO文件
-    $isoFile = Get-ChildItem -Path $7zExtractDir -Filter "*.iso" -Recurse | Select-Object -First 1
-    if (-not $isoFile) { throw "No ISO found in $7zExtractDir" }
-    $isoPath = $isoFile.FullName
-
-    # 4. 提取install.esd
-    $esdExtractDir = Join-Path -Path $tempDir -ChildPath "$($source.Name)_EsdExtract"
-    $esdPath = Extract-InstallEsdFromIso -IsoPath $isoPath -OutputDir $esdExtractDir
-
-    # 5. 合并映像到WIM
-    Add-ImageToWim -EsdPath $esdPath -TargetWimPath $targetWimPath -IsFirstImage $isFirstImage
-    $isFirstImage = $false
-
-    # 6. 逐源清理临时文件（7z/ISO/ESD）
-    $tempFiles = $7zFiles + $isoPath + $esdPath + $7zExtractDir + $esdExtractDir
-    Cleanup-TempFiles -FilesToDelete $tempFiles
-}
-
-# 转换WIM到ESD
-Convert-WimToEsd -WimPath $targetWimPath -EsdPath $targetEsdPath
-Cleanup-TempFiles -FilesToDelete @($targetWimPath)  # 清理WIM，仅保留ESD
-
-# 分卷压缩ESD
-$splitPrefix = Join-Path -Path $outputDir -ChildPath $releaseName
-$splitFiles = Split-FileToVolumes -SourceFile $targetEsdPath -OutputPrefix $splitPrefix -VolumeSize $splitSize
-
-# 发布到GitHub Releases
-Publish-GitHubRelease -ReleaseName $releaseName -Tag $releaseName -FilesToUpload $splitFiles -RetentionDays $artifactRetentionDays
-
-# 最终提示
-Write-Host "`n==================================================" -ForegroundColor Green
-Write-Host "All tasks completed successfully!" -ForegroundColor Green
-Write-Host "Final files: $($splitFiles -join '; ')" -ForegroundColor Green
-Write-Host "==================================================" -ForegroundColor Green
+    # Upload to GitHub Releases
+    - name: Upload to GitHub Releases
+      uses: softprops/action-gh-release@v2
+      with:
+        name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
+        tag_name: v1.0.0
+        draft: false
+        prerelease: false
+        files: |
+          ${{ env.TEMP }}\merge_process\${{ env.OUTPUT_ESD_NAME }}.part*
+        token: ${{ secrets.GITHUB_TOKEN }}
