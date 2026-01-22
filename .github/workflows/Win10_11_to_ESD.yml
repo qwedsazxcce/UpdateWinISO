@@ -1,3 +1,4 @@
+name: Win10_11_to_ESD
 <#
 Win10/11 LTSC 映像合并发布脚本
 核心功能：7z分卷下载→解压→WIM合并→ESD转换→分卷→GitHub Releases发布
