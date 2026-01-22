@@ -360,7 +360,16 @@ jobs:
         
         Write-Host "Converting WIM to ESD with maximum compression..."
         $esdFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
-        dism /Export-Image /SourceImageFile:$wimFile /SourceIndex:* /DestinationImageFile:$esdFile /Compress:recovery /CheckIntegrity
+        # First check how many images are in the WIM file
+        Write-Host "Checking WIM file info..."
+        dism /Get-WimInfo /WimFile:$wimFile
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to get WIM info"
+        }
+        
+        # Export all images from WIM to ESD using /SourceAll for multiple images
+        Write-Host "Exporting all images to ESD format..."
+        dism /Export-Image /SourceImageFile:$wimFile /SourceAll /DestinationImageFile:$esdFile /Compress:recovery /CheckIntegrity
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to convert WIM to ESD"
         }
