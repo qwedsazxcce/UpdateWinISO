@@ -1,324 +1,398 @@
 name: Windows_10-11_ESD
 
-on:
-  workflow_dispatch: # 手动触发
-
 env:
-  # ========== 仅此处使用变量存储下载地址（方便替换） ==========
-  WIN10_X86_001_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001"
-  WIN10_X86_002_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002"
-  
-  WIN10_X64_001_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001"
-  WIN10_X64_002_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002"
-  WIN10_X64_003_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003"
-  
-  WIN11_X64_001_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001"
-  WIN11_X64_002_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002"
-  WIN11_X64_003_URL: "https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003"
+  # Download URL environment variables - for easy replacement later
+  WIN10_X86_URL_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
+  WIN10_X86_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
+  WIN10_AMD64_URL_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001
+  WIN10_AMD64_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002
+  WIN10_AMD64_URL_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
+  WIN11_AMD64_URL_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001
+  WIN11_AMD64_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
+  WIN11_AMD64_URL_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
+
+"on":
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/Windows_10-11_ESD.yml'
 
 jobs:
-  build-and-release:
+  build:
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: pwsh
-        working-directory: ${{ github.workspace }}
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Configure system encoding
-        run: |
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          [Console]::InputEncoding = [System.Text.Encoding]::UTF8
-          Write-Host "System encoding set to UTF-8 successfully"
-
-      # ========== 处理Win10 LTSC2021 x86 ==========
-      - name: Download Win10 LTSC2021 x86 7z volumes
-        run: |
-          Write-Host "Starting download of Win10 LTSC2021 x86 7z volumes..."
-          curl -L -o "Windows10_LTSC2021_x86-19044.6811.7z.001" $env:WIN10_X86_001_URL
-          curl -L -o "Windows10_LTSC2021_x86-19044.6811.7z.002" $env:WIN10_X86_002_URL
-          Write-Host "Win10 LTSC2021 x86 7z volumes downloaded successfully"
-
-      - name: Extract Win10 LTSC2021 x86 7z volumes
-        run: |
-          Write-Host "Extracting Win10 LTSC2021 x86 7z volumes..."
-          7z x "Windows10_LTSC2021_x86-19044.6811.7z.001" -o"./Win10_x86_Extract" -y
-          Write-Host "Win10 LTSC2021 x86 7z volumes extracted successfully"
-
-      - name: Extract install.esd from Win10 x86 ISO (Fixed Drive Letter)
-        run: |
-          Write-Host "Finding Win10 x86 ISO file..."
-          $isoFile = Get-ChildItem -Path "./Win10_x86_Extract" -Filter *.iso -Recurse | Select-Object -First 1
-          if (-not $isoFile) {
-            Write-Error "Win10 x86 ISO file not found!"
-            exit 1
-          }
-          Write-Host "Mounting ISO: $($isoFile.FullName)"
-          
-          # 挂载ISO并等待挂载完成
-          Mount-DiskImage -ImagePath $isoFile.FullName -PassThru | Out-Null
-          Start-Sleep -Seconds 5
-          
-          # 精准获取有盘符的卷
-          $diskImage = Get-DiskImage -ImagePath $isoFile.FullName
-          $volume = Get-Volume -DiskImage $diskImage | Where-Object { $null -ne $_.DriveLetter }
-          if (-not $volume) {
-            Write-Error "Failed to get drive letter for mounted ISO!"
-            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
-            exit 1
-          }
-          $driveLetter = $volume.DriveLetter
-          $isoRootPath = "$driveLetter`:\"
-          Write-Host "ISO mounted to drive: $isoRootPath"
-          
-          # 校验并提取install.esd
-          $esdPath = Join-Path -Path $isoRootPath -ChildPath "sources\install.esd"
-          if (-not (Test-Path -Path $esdPath)) {
-            Write-Error "install.esd not found at $esdPath!"
-            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
-            exit 1
-          }
-          Write-Host "Extracting install.esd from ISO root: $isoRootPath"
-          Copy-Item -Path $esdPath -Destination "./install_x86.esd" -Force
-          Write-Host "install.esd extracted successfully"
-          
-          # 卸载ISO
-          Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
-
-      - name: Export first image to target WIM (Win10 x86)
-        run: |
-          Write-Host "Exporting first image from install_x86.esd to Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim..."
-          # 核心修复：给含&的文件名加双引号，避免PowerShell解析错误
-          dism /export-image /sourceimagefile:./install_x86.esd /sourceindex:1 /destinationimagefile:"./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim" /compress:max /checkintegrity
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "DISM export failed for Win10 x86!"
-            exit 1
-          }
-          Write-Host "Win10 x86 image exported to target WIM successfully"
-
-      - name: Cleanup Win10 x86 temporary files
-        run: |
-          Write-Host "Cleaning up Win10 x86 temporary files..."
-          Remove-Item -Path "Windows10_LTSC2021_x86-19044.6811.7z.001","Windows10_LTSC2021_x86-19044.6811.7z.002" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "./Win10_x86_Extract" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "./install_x86.esd" -Force -ErrorAction SilentlyContinue
-          Write-Host "Win10 x86 temporary files cleaned up successfully"
-
-      # ========== 处理Win10 LTSC2021 x64 ==========
-      - name: Download Win10 LTSC2021 x64 7z volumes
-        run: |
-          Write-Host "Starting download of Win10 LTSC2021 x64 7z volumes..."
-          curl -L -o "Windows10_LTSC2021_amd64-19044.6811.7z.001" $env:WIN10_X64_001_URL
-          curl -L -o "Windows10_LTSC2021_amd64-19044.6811.7z.002" $env:WIN10_X64_002_URL
-          curl -L -o "Windows10_LTSC2021_amd64-19044.6811.7z.003" $env:WIN10_X64_003_URL
-          Write-Host "Win10 LTSC2021 x64 7z volumes downloaded successfully"
-
-      - name: Extract Win10 LTSC2021 x64 7z volumes
-        run: |
-          Write-Host "Extracting Win10 LTSC2021 x64 7z volumes..."
-          7z x "Windows10_LTSC2021_amd64-19044.6811.7z.001" -o"./Win10_x64_Extract" -y
-          Write-Host "Win10 LTSC2021 x64 7z volumes extracted successfully"
-
-      - name: Extract install.esd from Win10 x64 ISO (Fixed Drive Letter)
-        run: |
-          Write-Host "Finding Win10 x64 ISO file..."
-          $isoFile = Get-ChildItem -Path "./Win10_x64_Extract" -Filter *.iso -Recurse | Select-Object -First 1
-          if (-not $isoFile) {
-            Write-Error "Win10 x64 ISO file not found!"
-            exit 1
-          }
-          Write-Host "Mounting ISO: $($isoFile.FullName)"
-          
-          Mount-DiskImage -ImagePath $isoFile.FullName -PassThru | Out-Null
-          Start-Sleep -Seconds 5
-          $diskImage = Get-DiskImage -ImagePath $isoFile.FullName
-          $volume = Get-Volume -DiskImage $diskImage | Where-Object { $null -ne $_.DriveLetter }
-          if (-not $volume) {
-            Write-Error "Failed to get drive letter for mounted ISO!"
-            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
-            exit 1
-          }
-          $driveLetter = $volume.DriveLetter
-          $isoRootPath = "$driveLetter`:\"
-          Write-Host "ISO mounted to drive: $isoRootPath"
-          
-          $esdPath = Join-Path -Path $isoRootPath -ChildPath "sources\install.esd"
-          if (-not (Test-Path -Path $esdPath)) {
-            Write-Error "install.esd not found at $esdPath!"
-            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
-            exit 1
-          }
-          Write-Host "Extracting install.esd from ISO root: $isoRootPath"
-          Copy-Item -Path $esdPath -Destination "./install_x64.esd" -Force
-          Write-Host "install.esd extracted successfully"
-          Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
-
-      - name: Export first image to temp WIM (Win10 x64)
-        run: |
-          Write-Host "Exporting first image from install_x64.esd to temp install.wim..."
-          dism /export-image /sourceimagefile:./install_x64.esd /sourceindex:1 /destinationimagefile:./install.wim /compress:max /checkintegrity
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "DISM export failed for Win10 x64 (temp WIM)!"
-            exit 1
-          }
-          Write-Host "Win10 x64 image exported to temp WIM successfully"
-
-      - name: Append temp WIM to target WIM (Win10 x64)
-        run: |
-          Write-Host "Appending temp install.wim to Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim..."
-          # 核心修复：给含&的文件名加双引号
-          dism /append-image /imagefile:"./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim" /capturedir:./ /sourceimagefile:./install.wim /sourceindex:1 /checkintegrity
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "DISM append failed for Win10 x64!"
-            exit 1
-          }
-          Write-Host "Win10 x64 image appended to target WIM successfully"
-
-      - name: Cleanup Win10 x64 temporary files
-        run: |
-          Write-Host "Cleaning up Win10 x64 temporary files..."
-          Remove-Item -Path "Windows10_LTSC2021_amd64-19044.6811.7z.001","Windows10_LTSC2021_amd64-19044.6811.7z.002","Windows10_LTSC2021_amd64-19044.6811.7z.003" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "./Win10_x64_Extract" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "./install_x64.esd","./install.wim" -Force -ErrorAction SilentlyContinue
-          Write-Host "Win10 x64 temporary files cleaned up successfully"
-
-      # ========== 处理Win11 LTSC2024 x64 ==========
-      - name: Download Win11 LTSC2024 x64 7z volumes
-        run: |
-          Write-Host "Starting download of Win11 LTSC2024 x64 7z volumes..."
-          curl -L -o "Windows11_LTSC2024_amd64-26200.7627.7z.001" $env:WIN11_X64_001_URL
-          curl -L -o "Windows11_LTSC2024_amd64-26200.7627.7z.002" $env:WIN11_X64_002_URL
-          curl -L -o "Windows11_LTSC2024_amd64-26200.7627.7z.003" $env:WIN11_X64_003_URL
-          Write-Host "Win11 LTSC2024 x64 7z volumes downloaded successfully"
-
-      - name: Extract Win11 LTSC2024 x64 7z volumes
-        run: |
-          Write-Host "Extracting Win11 LTSC2024 x64 7z volumes..."
-          7z x "Windows11_LTSC2024_amd64-26200.7627.7z.001" -o"./Win11_x64_Extract" -y
-          Write-Host "Win11 LTSC2024 x64 7z volumes extracted successfully"
-
-      - name: Extract install.esd from Win11 x64 ISO (Fixed Drive Letter)
-        run: |
-          Write-Host "Finding Win11 x64 ISO file..."
-          $isoFile = Get-ChildItem -Path "./Win11_x64_Extract" -Filter *.iso -Recurse | Select-Object -First 1
-          if (-not $isoFile) {
-            Write-Error "Win11 x64 ISO file not found!"
-            exit 1
-          }
-          Write-Host "Mounting ISO: $($isoFile.FullName)"
-          
-          Mount-DiskImage -ImagePath $isoFile.FullName -PassThru | Out-Null
-          Start-Sleep -Seconds 5
-          $diskImage = Get-DiskImage -ImagePath $isoFile.FullName
-          $volume = Get-Volume -DiskImage $diskImage | Where-Object { $null -ne $_.DriveLetter }
-          if (-not $volume) {
-            Write-Error "Failed to get drive letter for mounted ISO!"
-            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
-            exit 1
-          }
-          $driveLetter = $volume.DriveLetter
-          $isoRootPath = "$driveLetter`:\"
-          Write-Host "ISO mounted to drive: $isoRootPath"
-          
-          $esdPath = Join-Path -Path $isoRootPath -ChildPath "sources\install.esd"
-          if (-not (Test-Path -Path $esdPath)) {
-            Write-Error "install.esd not found at $esdPath!"
-            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
-            exit 1
-          }
-          Write-Host "Extracting install.esd from ISO root: $isoRootPath"
-          Copy-Item -Path $esdPath -Destination "./install_11.esd" -Force
-          Write-Host "install.esd extracted successfully"
-          Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
-
-      - name: Export first image to temp WIM (Win11 x64)
-        run: |
-          Write-Host "Exporting first image from install_11.esd to temp install.wim..."
-          dism /export-image /sourceimagefile:./install_11.esd /sourceindex:1 /destinationimagefile:./install.wim /compress:max /checkintegrity
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "DISM export failed for Win11 x64 (temp WIM)!"
-            exit 1
-          }
-          Write-Host "Win11 x64 image exported to temp WIM successfully"
-
-      - name: Append temp WIM to target WIM (Win11 x64)
-        run: |
-          Write-Host "Appending temp install.wim to Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim..."
-          # 核心修复：给含&的文件名加双引号
-          dism /append-image /imagefile:"./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim" /capturedir:./ /sourceimagefile:./install.wim /sourceindex:1 /checkintegrity
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "DISM append failed for Win11 x64!"
-            exit 1
-          }
-          Write-Host "Win11 x64 image appended to target WIM successfully"
-
-      - name: Cleanup Win11 x64 temporary files
-        run: |
-          Write-Host "Cleaning up Win11 x64 temporary files..."
-          Remove-Item -Path "Windows11_LTSC2024_amd64-26200.7627.7z.001","Windows11_LTSC2024_amd64-26200.7627.7z.002","Windows11_LTSC2024_amd64-26200.7627.7z.003" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "./Win11_x64_Extract" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "./install_11.esd","./install.wim" -Force -ErrorAction SilentlyContinue
-          Write-Host "Win11 x64 temporary files cleaned up successfully"
-
-      # ========== 转换WIM到高压缩ESD ==========
-      - name: Convert WIM to high-compression ESD
-        run: |
-          Write-Host "Converting Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim to Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd..."
-          # 核心修复：给含&的文件名加双引号
-          dism /export-image /sourceimagefile:"./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim" /sourceindex:1 /destinationimagefile:"./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd" /compress:recovery /checkintegrity
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "DISM export failed for ESD index 1!"
-            exit 1
-          }
-          
-          # 获取WIM信息（注意文件名加引号）
-          $wimInfo = dism /get-imageinfo /imagefile:"./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
-          $indexes = ($wimInfo | Select-String -Pattern "Image Index: (\d+)").Matches | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -ne 1 }
-          foreach ($index in $indexes) {
-            Write-Host "Exporting image index $index to ESD..."
-            dism /export-image /sourceimagefile:"./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim" /sourceindex:$index /destinationimagefile:"./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd" /compress:recovery /checkintegrity
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup 7-Zip
+      run: |
+        choco install 7zip -y
+        echo "C:\Program Files\7-Zip" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        
+    - name: Create working directory
+      run: |
+        mkdir workdir
+        cd workdir
+        
+    # Process Windows 10 x86 LTSC 2021
+    - name: Download Windows 10 x86 LTSC 2021 part 1
+      run: |
+        cd workdir
+        curl -L -o Windows10_LTSC2021_x86-19044.6811.7z.001 ${{ env.WIN10_X86_URL_001 }}
+        
+    - name: Download Windows 10 x86 LTSC 2021 part 2
+      run: |
+        cd workdir
+        curl -L -o Windows10_LTSC2021_x86-19044.6811.7z.002 ${{ env.WIN10_X86_URL_002 }}
+        
+    - name: Extract Windows 10 x86 LTSC 2021 archive
+      run: |
+        cd workdir
+        7z x Windows10_LTSC2021_x86-19044.6811.7z.001 -oWindows10_x86_iso
+        
+    - name: Find and extract ISO file
+      run: |
+        cd workdir\Windows10_x86_iso
+        $isoFile = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
+        if ($isoFile -and (Test-Path $isoFile.FullName)) {
+            Write-Host "Found ISO file: $($isoFile.Name)"
+            7z x "$($isoFile.FullName)" -osources_extract
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "DISM export failed for index $index!"
-              exit 1
+                throw "Failed to extract ISO file"
             }
-          }
-          Write-Host "WIM converted to high-compression ESD successfully"
-
-      # ========== 1950M分卷压缩ESD ==========
-      - name: Split ESD into 1950M volumes
-        run: |
-          Write-Host "Splitting Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd into 1950M volumes..."
-          # 核心修复：给含&的文件名加双引号
-          7z a -v1950M -t7z -mx=9 "./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z" "./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "7z volume split failed!"
-            exit 1
-          }
-          Write-Host "ESD split into 1950M volumes successfully"
-
-      # ========== 清理最终临时文件 ==========
-      - name: Cleanup final temporary files
-        run: |
-          Write-Host "Cleaning up final temporary files..."
-          # 核心修复：给含&的文件名加双引号
-          Remove-Item -Path "./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd" -Force -ErrorAction SilentlyContinue
-          Write-Host "Final temporary files cleaned up successfully"
-
-      # ========== 发布到GitHub Releases ==========
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
-          name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
-          files: |
-            ./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z.*
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        } else {
+            throw "No ISO file found in archive"
+        }
+        
+    - name: Extract install.esd and create initial WIM
+      run: |
+        cd workdir\Windows10_x86_iso\sources_extract
+        # Handle case sensitivity for sources directory
+        if (Test-Path "sources") {
+            $sourcesPath = "sources"
+        } elseif (Test-Path "Sources") {
+            $sourcesPath = "Sources"
+        } else {
+            throw "Sources directory not found"
+        }
+        
+        Write-Host "Searching for install.esd in: $sourcesPath"
+        
+        # Handle case sensitivity for install.esd file
+        $esdFiles = Get-ChildItem -Path $sourcesPath -Filter "install.esd" -ErrorAction SilentlyContinue
+        if (-not $esdFiles) {
+            $esdFiles = Get-ChildItem -Path $sourcesPath -Filter "Install.esd" -ErrorAction SilentlyContinue
+        }
+        if (-not $esdFiles) {
+            $esdFiles = Get-ChildItem -Path $sourcesPath -Filter "INSTALL.ESD" -ErrorAction SilentlyContinue
+        }
+        
+        if ($esdFiles -and $esdFiles.Count -gt 0) {
+            $esdFile = $esdFiles[0]
+            Write-Host "Found ESD file: $($esdFile.Name)"
+            
+            if (Test-Path $esdFile.FullName) {
+                7z x "$($esdFile.FullName)" -oextracted_esd
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Failed to extract ESD file"
+                }
+                
+                cd extracted_esd
+                if (Test-Path "install.esd") {
+                    # Export first image to new WIM file
+                    dism /Export-Image /SourceImageFile:install.esd /SourceIndex:1 /DestinationImageFile:..\..\..\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim /Compress:max
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "Failed to export WIM image"
+                    }
+                    Write-Host "Successfully created initial WIM file"
+                } else {
+                    throw "install.esd not found after extraction"
+                }
+            } else {
+                throw "ESD file path does not exist: $($esdFile.FullName)"
+            }
+        } else {
+            throw "No install.esd file found in sources directory"
+        }
+        
+    - name: Cleanup Windows 10 x86 temporary files
+      run: |
+        cd workdir
+        Remove-Item Windows10_LTSC2021_x86-19044.6811.7z.001 -Force
+        Remove-Item Windows10_LTSC2021_x86-19044.6811.7z.002 -Force
+        Remove-Item Windows10_x86_iso -Recurse -Force
+        if (Test-Path "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim") {
+            Write-Host "Initial WIM created successfully"
+        }
+        
+    # Process Windows 10 amd64 LTSC 2021
+    - name: Download Windows 10 amd64 LTSC 2021 part 1
+      run: |
+        cd workdir
+        curl -L -o Windows10_LTSC2021_amd64-19044.6811.7z.001 ${{ env.WIN10_AMD64_URL_001 }}
+        
+    - name: Download Windows 10 amd64 LTSC 2021 part 2
+      run: |
+        cd workdir
+        curl -L -o Windows10_LTSC2021_amd64-19044.6811.7z.002 ${{ env.WIN10_AMD64_URL_002 }}
+        
+    - name: Download Windows 10 amd64 LTSC 2021 part 3
+      run: |
+        cd workdir
+        curl -L -o Windows10_LTSC2021_amd64-19044.6811.7z.003 ${{ env.WIN10_AMD64_URL_003 }}
+        
+    - name: Extract Windows 10 amd64 LTSC 2021 archive
+      run: |
+        cd workdir
+        7z x Windows10_LTSC2021_amd64-19044.6811.7z.001 -oWindows10_amd64_iso
+        
+    - name: Find and extract ISO file for amd64
+      run: |
+        cd workdir\Windows10_amd64_iso
+        $isoFile = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
+        if ($isoFile -and (Test-Path $isoFile.FullName)) {
+            Write-Host "Found ISO file: $($isoFile.Name)"
+            7z x "$($isoFile.FullName)" -osources_extract
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to extract ISO file"
+            }
+        } else {
+            throw "No ISO file found in archive"
+        }
+        
+    - name: Extract install.esd and append to existing WIM
+      run: |
+        cd workdir\Windows10_amd64_iso\sources_extract
+        # Handle case sensitivity for sources directory
+        if (Test-Path "sources") {
+            $sourcesPath = "sources"
+        } elseif (Test-Path "Sources") {
+            $sourcesPath = "Sources"
+        } else {
+            throw "Sources directory not found"
+        }
+        
+        Write-Host "Searching for install.esd in: $sourcesPath"
+        
+        # Handle case sensitivity for install.esd file
+        $esdFiles = Get-ChildItem -Path $sourcesPath -Filter "install.esd" -ErrorAction SilentlyContinue
+        if (-not $esdFiles) {
+            $esdFiles = Get-ChildItem -Path $sourcesPath -Filter "Install.esd" -ErrorAction SilentlyContinue
+        }
+        if (-not $esdFiles) {
+            $esdFiles = Get-ChildItem -Path $sourcesPath -Filter "INSTALL.ESD" -ErrorAction SilentlyContinue
+        }
+        
+        if ($esdFiles -and $esdFiles.Count -gt 0) {
+            $esdFile = $esdFiles[0]
+            Write-Host "Found ESD file: $($esdFile.Name)"
+            
+            if (Test-Path $esdFile.FullName) {
+                7z x "$($esdFile.FullName)" -oextracted_esd
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Failed to extract ESD file"
+                }
+                
+                cd extracted_esd
+                if (Test-Path "install.esd") {
+                    # Export first image to temporary WIM file
+                    dism /Export-Image /SourceImageFile:install.esd /SourceIndex:1 /DestinationImageFile:install.wim /Compress:max
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "Failed to export temporary WIM image"
+                    }
+                    
+                    # Verify temporary WIM was created
+                    if (Test-Path "install.wim") {
+                        # Append to existing WIM file
+                        dism /Export-Image /SourceImageFile:install.wim /SourceIndex:1 /DestinationImageFile:..\..\..\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim /DestinationName:"Windows 10 LTSC 2021 amd64" /Compress:max
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Failed to append WIM image"
+                        }
+                        Write-Host "Successfully appended Windows 10 amd64 image"
+                    } else {
+                        throw "Temporary WIM file was not created"
+                    }
+                } else {
+                    throw "install.esd not found after extraction"
+                }
+            } else {
+                throw "ESD file path does not exist: $($esdFile.FullName)"
+            }
+        } else {
+            throw "No install.esd file found in sources directory"
+        }
+        
+    - name: Cleanup Windows 10 amd64 temporary files
+      run: |
+        cd workdir
+        Remove-Item Windows10_LTSC2021_amd64-19044.6811.7z.001 -Force
+        Remove-Item Windows10_LTSC2021_amd64-19044.6811.7z.002 -Force
+        Remove-Item Windows10_LTSC2021_amd64-19044.6811.7z.003 -Force
+        Remove-Item Windows10_amd64_iso -Recurse -Force
+        Remove-Item install.wim -ErrorAction SilentlyContinue
+        
+    # Process Windows 11 amd64 LTSC 2024
+    - name: Download Windows 11 amd64 LTSC 2024 part 1
+      run: |
+        cd workdir
+        curl -L -o Windows11_LTSC2024_amd64-26200.7627.7z.001 ${{ env.WIN11_AMD64_URL_001 }}
+        
+    - name: Download Windows 11 amd64 LTSC 2024 part 2
+      run: |
+        cd workdir
+        curl -L -o Windows11_LTSC2024_amd64-26200.7627.7z.002 ${{ env.WIN11_AMD64_URL_002 }}
+        
+    - name: Download Windows 11 amd64 LTSC 2024 part 3
+      run: |
+        cd workdir
+        curl -L -o Windows11_LTSC2024_amd64-26200.7627.7z.003 ${{ env.WIN11_AMD64_URL_003 }}
+        
+    - name: Extract Windows 11 amd64 LTSC 2024 archive
+      run: |
+        cd workdir
+        7z x Windows11_LTSC2024_amd64-26200.7627.7z.001 -oWindows11_amd64_iso
+        
+    - name: Find and extract ISO file for Windows 11
+      run: |
+        cd workdir\Windows11_amd64_iso
+        $isoFile = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
+        if ($isoFile -and (Test-Path $isoFile.FullName)) {
+            Write-Host "Found ISO file: $($isoFile.Name)"
+            7z x "$($isoFile.FullName)" -osources_extract
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to extract ISO file"
+            }
+        } else {
+            throw "No ISO file found in archive"
+        }
+        
+    - name: Extract install.esd and append to existing WIM
+      run: |
+        cd workdir\Windows11_amd64_iso\sources_extract
+        # Handle case sensitivity for sources directory
+        if (Test-Path "sources") {
+            $sourcesPath = "sources"
+        } elseif (Test-Path "Sources") {
+            $sourcesPath = "Sources"
+        } else {
+            throw "Sources directory not found"
+        }
+        
+        Write-Host "Searching for install.esd in: $sourcesPath"
+        
+        # Handle case sensitivity for install.esd file
+        $esdFiles = Get-ChildItem -Path $sourcesPath -Filter "install.esd" -ErrorAction SilentlyContinue
+        if (-not $esdFiles) {
+            $esdFiles = Get-ChildItem -Path $sourcesPath -Filter "Install.esd" -ErrorAction SilentlyContinue
+        }
+        if (-not $esdFiles) {
+            $esdFiles = Get-ChildItem -Path $sourcesPath -Filter "INSTALL.ESD" -ErrorAction SilentlyContinue
+        }
+        
+        if ($esdFiles -and $esdFiles.Count -gt 0) {
+            $esdFile = $esdFiles[0]
+            Write-Host "Found ESD file: $($esdFile.Name)"
+            
+            if (Test-Path $esdFile.FullName) {
+                7z x "$($esdFile.FullName)" -oextracted_esd
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Failed to extract ESD file"
+                }
+                
+                cd extracted_esd
+                if (Test-Path "install.esd") {
+                    # Export first image to temporary WIM file
+                    dism /Export-Image /SourceImageFile:install.esd /SourceIndex:1 /DestinationImageFile:install.wim /Compress:max
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "Failed to export temporary WIM image"
+                    }
+                    
+                    # Verify temporary WIM was created
+                    if (Test-Path "install.wim") {
+                        # Append to existing WIM file
+                        dism /Export-Image /SourceImageFile:install.wim /SourceIndex:1 /DestinationImageFile:..\..\..\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim /DestinationName:"Windows 11 LTSC 2024 amd64" /Compress:max
+                        if ($LASTEXITCODE -ne 0) {
+                            throw "Failed to append WIM image"
+                        }
+                        Write-Host "Successfully appended Windows 11 amd64 image"
+                    } else {
+                        throw "Temporary WIM file was not created"
+                    }
+                } else {
+                    throw "install.esd not found after extraction"
+                }
+            } else {
+                throw "ESD file path does not exist: $($esdFile.FullName)"
+            }
+        } else {
+            throw "No install.esd file found in sources directory"
+        }
+        
+    - name: Cleanup Windows 11 amd64 temporary files
+      run: |
+        cd workdir
+        Remove-Item Windows11_LTSC2024_amd64-26200.7627.7z.001 -Force
+        Remove-Item Windows11_LTSC2024_amd64-26200.7627.7z.002 -Force
+        Remove-Item Windows11_LTSC2024_amd64-26200.7627.7z.003 -Force
+        Remove-Item Windows11_amd64_iso -Recurse -Force
+        Remove-Item install.wim -ErrorAction SilentlyContinue
+        
+    # Convert final WIM to ESD
+    - name: Convert WIM to ESD with maximum compression
+      run: |
+        cd workdir
+        # Verify source WIM file exists
+        if (-not (Test-Path "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim")) {
+            throw "Source WIM file not found"
+        }
+        
+        Write-Host "Converting WIM to ESD with maximum compression..."
+        dism /Export-Image /SourceImageFile:Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim /SourceIndex:* /DestinationImageFile:Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd /Compress:recovery /CheckIntegrity
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to convert WIM to ESD"
+        }
+        
+        # Verify ESD file was created
+        if (Test-Path "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd") {
+            Write-Host "Successfully converted to ESD format"
+            $esdSize = (Get-Item "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd").Length
+            Write-Host "ESD file size: $($esdSize / 1GB) GB"
+        } else {
+            throw "ESD file was not created"
+        }
+        
+    - name: Split ESD file into 1950MB volumes
+      run: |
+        cd workdir
+        # Verify ESD file exists before splitting
+        if (-not (Test-Path "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd")) {
+            throw "ESD file not found for splitting"
+        }
+        
+        Write-Host "Splitting ESD file into 1950MB volumes..."
+        7z a -v1950M Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to split ESD file"
+        }
+        
+        # Verify split files were created
+        $splitFiles = Get-ChildItem -Path . -Filter "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z.*"
+        if ($splitFiles -and $splitFiles.Count -gt 0) {
+            Write-Host "Created $($splitFiles.Count) volume files:"
+            foreach ($file in $splitFiles) {
+                Write-Host "  $($file.Name) - $($file.Length / 1MB) MB"
+            }
+        } else {
+            throw "No split volume files were created"
+        }
+        
+    - name: Upload release assets
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
+        tag_name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
+        files: |
+          workdir/Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z.*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
