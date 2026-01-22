@@ -27,8 +27,27 @@ jobs:
       
     - name: Setup 7-Zip
       run: |
+        # First try chocolatey
         choco install 7zip -y
-        echo "C:\Program Files\7-Zip" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Chocolatey install failed, trying winget..."
+            # Try winget as fallback
+            winget install 7zip.7zip
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Winget install failed, downloading directly..."
+                # Download and install 7-Zip directly as last resort
+                $url = "https://www.7-zip.org/a/7z2408-x64.msi"
+                $output = "$env:TEMP\7z-installer.msi"
+                Invoke-WebRequest -Uri $url -OutFile $output
+                Start-Process msiexec.exe -ArgumentList "/i", $output, "/quiet", "/norestart" -Wait
+                # Add to PATH
+                echo "C:\Program Files\7-Zip" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            } else {
+                echo "C:\Program Files\7-Zip" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            }
+        } else {
+            echo "C:\Program Files\7-Zip" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        }
         
     - name: Create working directory
       run: |
