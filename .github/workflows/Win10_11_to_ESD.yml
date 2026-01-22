@@ -1,7 +1,7 @@
 # 第一层：固定Workflow名称
 name: Windows_10-11_ESD
 
-# 触发方式：仅手动触发（避免误执行）
+# 触发方式：仅手动触发
 on:
   workflow_dispatch:
 
@@ -15,8 +15,8 @@ env:
   SPLIT_SIZE: 1950M
   # Artifact保留天数
   RETENTION_DAYS: 3
-  # 工作目录（统一定义，便于修改）
-  WORK_DIR: ${{ github.workspace }}\win_build
+  # 工作目录（统一定义）
+  WORK_DIR: "${{ github.workspace }}\\win_build"
 
   # 下载地址 - Win10 x86 LTSC2021 7z分卷
   WIN10_X86_VOL1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
@@ -32,117 +32,191 @@ env:
   WIN11_X64_VOL2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
   WIN11_X64_VOL3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
 
-# 第三层：实际执行代码
+# 第三层：PowerShell版执行代码
 jobs:
   build_and_release:
     runs-on: windows-latest
     defaults:
       run:
-        shell: cmd
-        # 修复点1：默认工作目录改为系统已存在的github.workspace（避免启动时目录不存在）
+        # 核心修改：切换为PowerShell（避免CMD注释符/语法问题）
+        shell: powershell
         working-directory: ${{ github.workspace }}
     steps:
-      # 步骤1：初始化工作环境（先创建目录，再执行后续操作）
+      # 步骤1：初始化工作环境
       - name: Initialize working environment
         run: |
-          echo "=== Initializing build environment ==="
-          # 修复点2：先检查并创建工作目录（确保目录存在）
-          if not exist "${{ env.WORK_DIR }}" mkdir "${{ env.WORK_DIR }}"
-          if not exist "${{ env.WORK_DIR }}\temp" mkdir "${{ env.WORK_DIR }}\temp"
+          Write-Host "=== Initializing build environment ==="
+          # 创建工作目录（Force参数：存在则不报错，不存在则创建）
+          New-Item -Path $env:WORK_DIR -ItemType Directory -Force | Out-Null
+          New-Item -Path "$env:WORK_DIR\temp" -ItemType Directory -Force | Out-Null
           # 验证基础工具可用性
-          7z --version
-          dism /? > nul
-          echo "Environment initialized successfully"
+          try {
+            7z --version | Out-Null
+            dism /? | Out-Null
+            Write-Host "Environment initialized successfully"
+          }
+          catch {
+            Write-Error "7z or DISM tool not found!"
+            exit 1
+          }
 
-      # 步骤2：处理Win10 x86 LTSC2021（仅新增cd切换目录，其余逻辑不变）
+      # 步骤2：处理Win10 x86 LTSC2021
       - name: Process Win10 x86 LTSC2021
         run: |
-          # 切换到目标工作目录
-          cd "${{ env.WORK_DIR }}"
-          echo "=== Processing Win10 x86 LTSC2021 ==="
-          # 下载7z分卷（带进度+速度）
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN10_X86_VOL1 }}
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN10_X86_VOL2 }}
-          # 解压7z分卷
-          7z x -y "Windows10_LTSC2021_x86-19044.6811.7z.001" -o"./temp"
-          # 提取ISO中的install.esd
-          for /r "./temp" %%f in (*.iso) do (
-            7z x -y "%%f" -o"./temp/esd" "sources/install.esd"
-          )
+          Write-Host "=== Processing Win10 x86 LTSC2021 ==="
+          # 切换到工作目录
+          Set-Location $env:WORK_DIR
+          
+          # 下载7z分卷（curl带进度+速度，PowerShell中curl是Invoke-WebRequest别名）
+          Write-Host "Downloading 7z volumes..."
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X86_VOL1
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X86_VOL2
+          
+          # 解压7z分卷（自动识别后续分卷）
+          Write-Host "Extracting 7z volumes..."
+          7z x -y "Windows10_LTSC2021_x86-19044.6811.7z.001" -o".\temp" | Out-Null
+          
+          # 提取ISO中的install.esd（PowerShell遍历ISO文件）
+          Write-Host "Extracting install.esd from ISO..."
+          $isoFile = Get-ChildItem -Path .\temp -Filter *.iso -Recurse -File | Select-Object -First 1
+          if ($isoFile) {
+            7z x -y $isoFile.FullName -o".\temp\esd" "sources/install.esd" | Out-Null
+          }
+          else {
+            Write-Error "ISO file not found in extracted 7z archive!"
+            exit 1
+          }
+          
           # 导出第一个映像到WIM（首次创建）
-          dism /export-image /sourceimagefile:"./temp/esd/sources/install.esd" /sourceindex:1 /destinationimagefile:"${{ env.TARGET_WIM }}" /compress:max /checkintegrity
-          # 清理临时文件
-          del /f /q "Windows10_LTSC2021_x86-19044.6811.7z.*"
-          rmdir /s /q "./temp"
-          mkdir ./temp
-          echo "Win10 x86 LTSC2021 processed successfully"
+          Write-Host "Exporting first image to WIM..."
+          dism /export-image `
+            /sourceimagefile:".\temp\esd\sources\install.esd" `
+            /sourceindex:1 `
+            /destinationimagefile:$env:TARGET_WIM `
+            /compress:max `
+            /checkintegrity
+          
+          # 清理临时文件（-ErrorAction SilentlyContinue：文件不存在则不报错）
+          Write-Host "Cleaning temporary files..."
+          Remove-Item -Path "Windows10_LTSC2021_x86-19044.6811.7z.*" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path .\temp -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -Path .\temp -ItemType Directory -Force | Out-Null
+          
+          Write-Host "Win10 x86 LTSC2021 processed successfully"
 
-      # 步骤3：处理Win10 x64 LTSC2021（仅新增cd切换目录，其余逻辑不变）
+      # 步骤3：处理Win10 x64 LTSC2021
       - name: Process Win10 x64 LTSC2021
         run: |
-          # 切换到目标工作目录
-          cd "${{ env.WORK_DIR }}"
-          echo "=== Processing Win10 x64 LTSC2021 ==="
+          Write-Host "=== Processing Win10 x64 LTSC2021 ==="
+          Set-Location $env:WORK_DIR
+          
           # 下载7z分卷
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN10_X64_VOL1 }}
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN10_X64_VOL2 }}
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN10_X64_VOL3 }}
+          Write-Host "Downloading 7z volumes..."
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X64_VOL1
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X64_VOL2
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X64_VOL3
+          
           # 解压7z分卷
-          7z x -y "Windows10_LTSC2021_amd64-19044.6811.7z.001" -o"./temp"
+          Write-Host "Extracting 7z volumes..."
+          7z x -y "Windows10_LTSC2021_amd64-19044.6811.7z.001" -o".\temp" | Out-Null
+          
           # 提取ISO中的install.esd
-          for /r "./temp" %%f in (*.iso) do (
-            7z x -y "%%f" -o"./temp/esd" "sources/install.esd"
-          )
-          # 追加第一个映像到WIM
-          dism /export-image /sourceimagefile:"./temp/esd/sources/install.esd" /sourceindex:1 /destinationimagefile:"${{ env.TARGET_WIM }}" /compress:max /checkintegrity
+          Write-Host "Extracting install.esd from ISO..."
+          $isoFile = Get-ChildItem -Path .\temp -Filter *.iso -Recurse -File | Select-Object -First 1
+          if ($isoFile) {
+            7z x -y $isoFile.FullName -o".\temp\esd" "sources/install.esd" | Out-Null
+          }
+          else {
+            Write-Error "ISO file not found in extracted 7z archive!"
+            exit 1
+          }
+          
+          # 追加第一个映像到现有WIM
+          Write-Host "Appending first image to WIM..."
+          dism /export-image `
+            /sourceimagefile:".\temp\esd\sources\install.esd" `
+            /sourceindex:1 `
+            /destinationimagefile:$env:TARGET_WIM `
+            /compress:max `
+            /checkintegrity
+          
           # 清理临时文件
-          del /f /q "Windows10_LTSC2021_amd64-19044.6811.7z.*"
-          rmdir /s /q "./temp"
-          mkdir ./temp
-          echo "Win10 x64 LTSC2021 processed successfully"
+          Write-Host "Cleaning temporary files..."
+          Remove-Item -Path "Windows10_LTSC2021_amd64-19044.6811.7z.*" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path .\temp -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -Path .\temp -ItemType Directory -Force | Out-Null
+          
+          Write-Host "Win10 x64 LTSC2021 processed successfully"
 
-      # 步骤4：处理Win11 x64 LTSC2024（仅新增cd切换目录，其余逻辑不变）
+      # 步骤4：处理Win11 x64 LTSC2024
       - name: Process Win11 x64 LTSC2024
         run: |
-          # 切换到目标工作目录
-          cd "${{ env.WORK_DIR }}"
-          echo "=== Processing Win11 x64 LTSC2024 ==="
+          Write-Host "=== Processing Win11 x64 LTSC2024 ==="
+          Set-Location $env:WORK_DIR
+          
           # 下载7z分卷
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN11_X64_VOL1 }}
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN11_X64_VOL2 }}
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s\n" -O ${{ env.WIN11_X64_VOL3 }}
+          Write-Host "Downloading 7z volumes..."
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN11_X64_VOL1
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN11_X64_VOL2
+          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN11_X64_VOL3
+          
           # 解压7z分卷
-          7z x -y "Windows11_LTSC2024_amd64-26200.7627.7z.001" -o"./temp"
+          Write-Host "Extracting 7z volumes..."
+          7z x -y "Windows11_LTSC2024_amd64-26200.7627.7z.001" -o".\temp" | Out-Null
+          
           # 提取ISO中的install.esd
-          for /r "./temp" %%f in (*.iso) do (
-            7z x -y "%%f" -o"./temp/esd" "sources/install.esd"
-          )
-          # 追加第一个映像到WIM
-          dism /export-image /sourceimagefile:"./temp/esd/sources/install.esd" /sourceindex:1 /destinationimagefile:"${{ env.TARGET_WIM }}" /compress:max /checkintegrity
+          Write-Host "Extracting install.esd from ISO..."
+          $isoFile = Get-ChildItem -Path .\temp -Filter *.iso -Recurse -File | Select-Object -First 1
+          if ($isoFile) {
+            7z x -y $isoFile.FullName -o".\temp\esd" "sources/install.esd" | Out-Null
+          }
+          else {
+            Write-Error "ISO file not found in extracted 7z archive!"
+            exit 1
+          }
+          
+          # 追加第一个映像到现有WIM
+          Write-Host "Appending first image to WIM..."
+          dism /export-image `
+            /sourceimagefile:".\temp\esd\sources\install.esd" `
+            /sourceindex:1 `
+            /destinationimagefile:$env:TARGET_WIM `
+            /compress:max `
+            /checkintegrity
+          
           # 清理临时文件
-          del /f /q "Windows11_LTSC2024_amd64-26200.7627.7z.*"
-          rmdir /s /q "./temp"
-          echo "Win11 x64 LTSC2024 processed successfully"
+          Write-Host "Cleaning temporary files..."
+          Remove-Item -Path "Windows11_LTSC2024_amd64-26200.7627.7z.*" -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path .\temp -Recurse -Force -ErrorAction SilentlyContinue
+          
+          Write-Host "Win11 x64 LTSC2024 processed successfully"
 
-      # 步骤5：转换WIM到高压缩ESD（仅新增cd切换目录，其余逻辑不变）
+      # 步骤5：转换WIM到高压缩ESD
       - name: Convert WIM to high-compression ESD
         run: |
-          # 切换到目标工作目录
-          cd "${{ env.WORK_DIR }}"
-          echo "=== Converting WIM to ESD (recovery compression) ==="
-          # 高压缩转换为ESD
-          dism /export-image /sourceimagefile:"${{ env.TARGET_WIM }}" /sourceindex:all /destinationimagefile:"${{ env.TARGET_ESD }}" /compress:recovery /checkintegrity
-          echo "ESD conversion completed"
+          Write-Host "=== Converting WIM to ESD (recovery compression) ==="
+          Set-Location $env:WORK_DIR
+          
+          # 高压缩转换为ESD（recovery级别是ESD最高压缩）
+          dism /export-image `
+            /sourceimagefile:$env:TARGET_WIM `
+            /sourceindex:all `
+            /destinationimagefile:$env:TARGET_ESD `
+            /compress:recovery `
+            /checkintegrity
+          
+          Write-Host "ESD conversion completed"
 
-      # 步骤6：1950M分卷压缩ESD（仅新增cd切换目录，其余逻辑不变）
+      # 步骤6：1950M分卷压缩ESD
       - name: Split ESD to 1950M volumes
         run: |
-          # 切换到目标工作目录
-          cd "${{ env.WORK_DIR }}"
-          echo "=== Splitting ESD to ${{ env.SPLIT_SIZE }} volumes ==="
-          # 7z分卷压缩（最高压缩+指定分卷大小）
-          7z a -t7z -mx=9 -v${{ env.SPLIT_SIZE }} "${{ env.TARGET_ESD }}.7z" "${{ env.TARGET_ESD }}"
-          echo "Volume splitting completed"
+          Write-Host "=== Splitting ESD to $env:SPLIT_SIZE volumes ==="
+          Set-Location $env:WORK_DIR
+          
+          # 7z分卷压缩（-mx=9最高压缩，-v指定分卷大小）
+          7z a -t7z -mx=9 -v$env:SPLIT_SIZE "$env:TARGET_ESD.7z" $env:TARGET_ESD | Out-Null
+          
+          Write-Host "Volume splitting completed"
 
       # 步骤7：上传Artifact（防丢，保留3天）
       - name: Upload WIM artifact
@@ -166,7 +240,7 @@ jobs:
           path: ${{ env.WORK_DIR }}\${{ env.TARGET_ESD }}.7z.*
           retention-days: ${{ env.RETENTION_DAYS }}
 
-      # 步骤8：发布分卷成果到GitHub Releases（仅最终分卷）
+      # 步骤8：发布分卷成果到GitHub Releases
       - name: Release split volumes to GitHub Releases
         uses: softprops/action-gh-release@v1
         with:
