@@ -39,24 +39,24 @@ jobs:
     - name: Download Windows 10 x86 LTSC 2021 part 1
       run: |
         cd workdir
-        curl -L -o Windows10_LTSC2021_x86-19044.6811.7z.001 ${{ env.WIN10_X86_URL_001 }}
+        curl -L -o Windows10_LTSC2021_x86.7z.001 ${{ env.WIN10_X86_URL_001 }}
         
     - name: Download Windows 10 x86 LTSC 2021 part 2
       run: |
         cd workdir
-        curl -L -o Windows10_LTSC2021_x86-19044.6811.7z.002 ${{ env.WIN10_X86_URL_002 }}
+        curl -L -o Windows10_LTSC2021_x86.7z.002 ${{ env.WIN10_X86_URL_002 }}
         
     - name: Extract Windows 10 x86 LTSC 2021 archive
       run: |
         cd workdir
-        7z x Windows10_LTSC2021_x86-19044.6811.7z.001 -oWindows10_x86_iso
+        7z x Windows10_LTSC2021_x86.7z.001 -oWindows10_x86
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to extract Windows 10 x86 archive"
         }
         
     - name: Find and extract ISO file
       run: |
-        cd workdir\Windows10_x86_iso
+        cd workdir\Windows10_x86
         $isoFile = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
         if ($isoFile -and (Test-Path $isoFile.FullName)) {
             Write-Host "Found ISO file: $($isoFile.Name)"
@@ -70,7 +70,7 @@ jobs:
         
     - name: Extract install.esd and create initial WIM
       run: |
-        cd workdir\Windows10_x86_iso\sources_extract
+        cd workdir\Windows10_x86\sources_extract
         # Handle case sensitivity for sources directory
         if (Test-Path "sources") {
             $sourcesPath = "sources"
@@ -122,9 +122,9 @@ jobs:
     - name: Cleanup Windows 10 x86 temporary files
       run: |
         cd workdir
-        Remove-Item Windows10_LTSC2021_x86-19044.6811.7z.001 -Force
-        Remove-Item Windows10_LTSC2021_x86-19044.6811.7z.002 -Force
-        Remove-Item Windows10_x86_iso -Recurse -Force
+        Remove-Item Windows10_LTSC2021_x86.7z.001 -Force
+        Remove-Item Windows10_LTSC2021_x86.7z.002 -Force
+        Remove-Item Windows10_x86 -Recurse -Force
         $wimFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
         if (Test-Path $wimFile) {
             Write-Host "Initial WIM created successfully"
@@ -134,29 +134,29 @@ jobs:
     - name: Download Windows 10 amd64 LTSC 2021 part 1
       run: |
         cd workdir
-        curl -L -o Windows10_LTSC2021_amd64-19044.6811.7z.001 ${{ env.WIN10_AMD64_URL_001 }}
+        curl -L -o Windows10_LTSC2021_amd64.7z.001 ${{ env.WIN10_AMD64_URL_001 }}
         
     - name: Download Windows 10 amd64 LTSC 2021 part 2
       run: |
         cd workdir
-        curl -L -o Windows10_LTSC2021_amd64-19044.6811.7z.002 ${{ env.WIN10_AMD64_URL_002 }}
+        curl -L -o Windows10_LTSC2021_amd64.7z.002 ${{ env.WIN10_AMD64_URL_002 }}
         
     - name: Download Windows 10 amd64 LTSC 2021 part 3
       run: |
         cd workdir
-        curl -L -o Windows10_LTSC2021_amd64-19044.6811.7z.003 ${{ env.WIN10_AMD64_URL_003 }}
+        curl -L -o Windows10_LTSC2021_amd64.7z.003 ${{ env.WIN10_AMD64_URL_003 }}
         
     - name: Extract Windows 10 amd64 LTSC 2021 archive
       run: |
         cd workdir
-        7z x Windows10_LTSC2021_amd64-19044.6811.7z.001 -oWindows10_amd64_iso
+        7z x Windows10_LTSC2021_amd64.7z.001 -oWindows10_amd64
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to extract Windows 10 amd64 archive"
         }
         
     - name: Find and extract ISO file for amd64
       run: |
-        cd workdir\Windows10_amd64_iso
+        cd workdir\Windows10_amd64
         $isoFile = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
         if ($isoFile -and (Test-Path $isoFile.FullName)) {
             Write-Host "Found ISO file: $($isoFile.Name)"
@@ -170,7 +170,7 @@ jobs:
         
     - name: Extract install.esd and append to existing WIM
       run: |
-        cd workdir\Windows10_amd64_iso\sources_extract
+        cd workdir\Windows10_amd64\sources_extract
         # Handle case sensitivity for sources directory
         if (Test-Path "sources") {
             $sourcesPath = "sources"
@@ -233,39 +233,39 @@ jobs:
     - name: Cleanup Windows 10 amd64 temporary files
       run: |
         cd workdir
-        Remove-Item Windows10_LTSC2021_amd64-19044.6811.7z.001 -Force
-        Remove-Item Windows10_LTSC2021_amd64-19044.6811.7z.002 -Force
-        Remove-Item Windows10_LTSC2021_amd64-19044.6811.7z.003 -Force
-        Remove-Item Windows10_amd64_iso -Recurse -Force
+        Remove-Item Windows10_LTSC2021_amd64.7z.001 -Force
+        Remove-Item Windows10_LTSC2021_amd64.7z.002 -Force
+        Remove-Item Windows10_LTSC2021_amd64.7z.003 -Force
+        Remove-Item Windows10_amd64 -Recurse -Force
         Remove-Item install.wim -ErrorAction SilentlyContinue
         
     # Process Windows 11 amd64 LTSC 2024
     - name: Download Windows 11 amd64 LTSC 2024 part 1
       run: |
         cd workdir
-        curl -L -o Windows11_LTSC2024_amd64-26200.7627.7z.001 ${{ env.WIN11_AMD64_URL_001 }}
+        curl -L -o Windows11_LTSC2024_amd64.7z.001 ${{ env.WIN11_AMD64_URL_001 }}
         
     - name: Download Windows 11 amd64 LTSC 2024 part 2
       run: |
         cd workdir
-        curl -L -o Windows11_LTSC2024_amd64-26200.7627.7z.002 ${{ env.WIN11_AMD64_URL_002 }}
+        curl -L -o Windows11_LTSC2024_amd64.7z.002 ${{ env.WIN11_AMD64_URL_002 }}
         
     - name: Download Windows 11 amd64 LTSC 2024 part 3
       run: |
         cd workdir
-        curl -L -o Windows11_LTSC2024_amd64-26200.7627.7z.003 ${{ env.WIN11_AMD64_URL_003 }}
+        curl -L -o Windows11_LTSC2024_amd64.7z.003 ${{ env.WIN11_AMD64_URL_003 }}
         
     - name: Extract Windows 11 amd64 LTSC 2024 archive
       run: |
         cd workdir
-        7z x Windows11_LTSC2024_amd64-26200.7627.7z.001 -oWindows11_amd64_iso
+        7z x Windows11_LTSC2024_amd64.7z.001 -oWindows11_amd64
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to extract Windows 11 amd64 archive"
         }
         
     - name: Find and extract ISO file for Windows 11
       run: |
-        cd workdir\Windows11_amd64_iso
+        cd workdir\Windows11_amd64
         $isoFile = Get-ChildItem -Path . -Filter "*.iso" -Recurse | Select-Object -First 1
         if ($isoFile -and (Test-Path $isoFile.FullName)) {
             Write-Host "Found ISO file: $($isoFile.Name)"
@@ -279,7 +279,7 @@ jobs:
         
     - name: Extract install.esd and append to existing WIM
       run: |
-        cd workdir\Windows11_amd64_iso\sources_extract
+        cd workdir\Windows11_amd64\sources_extract
         # Handle case sensitivity for sources directory
         if (Test-Path "sources") {
             $sourcesPath = "sources"
@@ -342,10 +342,10 @@ jobs:
     - name: Cleanup Windows 11 amd64 temporary files
       run: |
         cd workdir
-        Remove-Item Windows11_LTSC2024_amd64-26200.7627.7z.001 -Force
-        Remove-Item Windows11_LTSC2024_amd64-26200.7627.7z.002 -Force
-        Remove-Item Windows11_LTSC2024_amd64-26200.7627.7z.003 -Force
-        Remove-Item Windows11_amd64_iso -Recurse -Force
+        Remove-Item Windows11_LTSC2024_amd64.7z.001 -Force
+        Remove-Item Windows11_LTSC2024_amd64.7z.002 -Force
+        Remove-Item Windows11_LTSC2024_amd64.7z.003 -Force
+        Remove-Item Windows11_amd64 -Recurse -Force
         Remove-Item install.wim -ErrorAction SilentlyContinue
         
     # Convert final WIM to ESD
@@ -360,19 +360,45 @@ jobs:
         
         Write-Host "Converting WIM to ESD with maximum compression..."
         $esdFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
+        
         # First check how many images are in the WIM file
         Write-Host "Checking WIM file info..."
-        dism /Get-WimInfo /WimFile:$wimFile
+        $wimInfo = dism /Get-WimInfo /WimFile:$wimFile
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to get WIM info"
         }
         
-        # Export all images from WIM to ESD using /SourceAll for multiple images
-        Write-Host "Exporting all images to ESD format..."
-        dism /Export-Image /SourceImageFile:$wimFile /SourceAll /DestinationImageFile:$esdFile /Compress:recovery /CheckIntegrity
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to convert WIM to ESD"
+        # Parse the WIM info to get image count
+        # Look for lines containing "Index :" to count images
+        $wimInfoLines = $wimInfo -split "`n"
+        $imageCount = ($wimInfoLines | Where-Object { $_ -match "Index\s*:\s*\d+" }).Count
+        
+        if ($imageCount -eq 0) {
+            # Fallback method: try to get image count from log or assume 3
+            Write-Host "Could not parse image count, assuming 3 images based on build process"
+            $imageCount = 3
         }
+        
+        Write-Host "Found $imageCount images in WIM file"
+        
+        # Export images one by one to the same ESD file
+        for ($i = 1; $i -le $imageCount; $i++) {
+            Write-Host "Exporting image $i of $imageCount..."
+            
+            if ($i -eq 1) {
+                # First image: create new ESD file
+                dism /Export-Image /SourceImageFile:$wimFile /SourceIndex:$i /DestinationImageFile:$esdFile /Compress:recovery /CheckIntegrity
+            } else {
+                # Subsequent images: append to existing ESD file
+                dism /Export-Image /SourceImageFile:$wimFile /SourceIndex:$i /DestinationImageFile:$esdFile /Compress:recovery /CheckIntegrity
+            }
+            
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to export image $i to ESD"
+            }
+        }
+        
+        Write-Host "Successfully exported all $imageCount images to ESD format"
         
         # Verify ESD file was created
         if (Test-Path $esdFile) {
