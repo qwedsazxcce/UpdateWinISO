@@ -1,7 +1,7 @@
 name: Windows_10-11_ESD
 
 on:
-  workflow_dispatch: # 手动触发工作流
+  workflow_dispatch: # 手动触发
 
 env:
   # ========== 仅此处使用变量存储下载地址（方便替换） ==========
@@ -21,8 +21,8 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        shell: pwsh # 强制使用PowerShell
-        working-directory: ${{ github.workspace }} # 固定工作目录为仓库根目录
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
     
     steps:
       - name: Checkout repository
@@ -30,9 +30,8 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Configure system encoding (avoid non-ASCII issues)
+      - name: Configure system encoding
         run: |
-          # 强制设置PowerShell输出/输入编码为UTF-8，彻底规避非ASCII字符问题
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::InputEncoding = [System.Text.Encoding]::UTF8
           Write-Host "System encoding set to UTF-8 successfully"
@@ -51,28 +50,43 @@ jobs:
           7z x "Windows10_LTSC2021_x86-19044.6811.7z.001" -o"./Win10_x86_Extract" -y
           Write-Host "Win10 LTSC2021 x86 7z volumes extracted successfully"
 
-      - name: Extract install.esd from Win10 x86 ISO (Fix Drive Letter Logic)
+      - name: Extract install.esd from Win10 x86 ISO (Fixed Drive Letter)
         run: |
           Write-Host "Finding Win10 x86 ISO file..."
-          # 完整逻辑获取ISO文件，无变量拼接
           $isoFile = Get-ChildItem -Path "./Win10_x86_Extract" -Filter *.iso -Recurse | Select-Object -First 1
           if (-not $isoFile) {
             Write-Error "Win10 x86 ISO file not found!"
             exit 1
           }
           Write-Host "Mounting ISO: $($isoFile.FullName)"
-          # 挂载ISO并正确获取盘符（核心修复点）
+          
+          # 挂载ISO并等待挂载完成（关键修复：添加延迟）
           Mount-DiskImage -ImagePath $isoFile.FullName -PassThru | Out-Null
+          Start-Sleep -Seconds 5 # 等待5秒确保挂载完成
+          
+          # 关键修复：重新获取挂载的ISO信息，筛选有盘符的分区
           $diskImage = Get-DiskImage -ImagePath $isoFile.FullName
-          $diskNumber = $diskImage.Number
-          $partition = Get-Partition -DiskNumber $diskNumber | Where-Object {$_.Type -eq 'Basic'}
-          $driveLetter = $partition.DriveLetter
+          $volume = Get-Volume -DiskImage $diskImage | Where-Object { $null -ne $_.DriveLetter }
+          if (-not $volume) {
+            Write-Error "Failed to get drive letter for mounted ISO!"
+            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
+            exit 1
+          }
+          $driveLetter = $volume.DriveLetter
           $isoRootPath = "$driveLetter`:\"
           Write-Host "ISO mounted to drive: $isoRootPath"
-          # 提取install.esd（兼容大小写）
+          
+          # 提取install.esd（兼容大小写，添加路径存在校验）
+          $esdPath = Join-Path -Path $isoRootPath -ChildPath "sources\install.esd"
+          if (-not (Test-Path -Path $esdPath)) {
+            Write-Error "install.esd not found at $esdPath!"
+            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
+            exit 1
+          }
           Write-Host "Extracting install.esd from ISO root: $isoRootPath"
-          Copy-Item -Path "$isoRootPath\sources\install.esd" -Destination "./install_x86.esd" -Force
+          Copy-Item -Path $esdPath -Destination "./install_x86.esd" -Force
           Write-Host "install.esd extracted successfully"
+          
           # 卸载ISO
           Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
 
@@ -109,7 +123,7 @@ jobs:
           7z x "Windows10_LTSC2021_amd64-19044.6811.7z.001" -o"./Win10_x64_Extract" -y
           Write-Host "Win10 LTSC2021 x64 7z volumes extracted successfully"
 
-      - name: Extract install.esd from Win10 x64 ISO (Fix Drive Letter Logic)
+      - name: Extract install.esd from Win10 x64 ISO (Fixed Drive Letter)
         run: |
           Write-Host "Finding Win10 x64 ISO file..."
           $isoFile = Get-ChildItem -Path "./Win10_x64_Extract" -Filter *.iso -Recurse | Select-Object -First 1
@@ -118,15 +132,28 @@ jobs:
             exit 1
           }
           Write-Host "Mounting ISO: $($isoFile.FullName)"
+          
           Mount-DiskImage -ImagePath $isoFile.FullName -PassThru | Out-Null
+          Start-Sleep -Seconds 5
           $diskImage = Get-DiskImage -ImagePath $isoFile.FullName
-          $diskNumber = $diskImage.Number
-          $partition = Get-Partition -DiskNumber $diskNumber | Where-Object {$_.Type -eq 'Basic'}
-          $driveLetter = $partition.DriveLetter
+          $volume = Get-Volume -DiskImage $diskImage | Where-Object { $null -ne $_.DriveLetter }
+          if (-not $volume) {
+            Write-Error "Failed to get drive letter for mounted ISO!"
+            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
+            exit 1
+          }
+          $driveLetter = $volume.DriveLetter
           $isoRootPath = "$driveLetter`:\"
           Write-Host "ISO mounted to drive: $isoRootPath"
+          
+          $esdPath = Join-Path -Path $isoRootPath -ChildPath "sources\install.esd"
+          if (-not (Test-Path -Path $esdPath)) {
+            Write-Error "install.esd not found at $esdPath!"
+            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
+            exit 1
+          }
           Write-Host "Extracting install.esd from ISO root: $isoRootPath"
-          Copy-Item -Path "$isoRootPath\sources\install.esd" -Destination "./install_x64.esd" -Force
+          Copy-Item -Path $esdPath -Destination "./install_x64.esd" -Force
           Write-Host "install.esd extracted successfully"
           Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
 
@@ -173,7 +200,7 @@ jobs:
           7z x "Windows11_LTSC2024_amd64-26200.7627.7z.001" -o"./Win11_x64_Extract" -y
           Write-Host "Win11 LTSC2024 x64 7z volumes extracted successfully"
 
-      - name: Extract install.esd from Win11 x64 ISO (Fix Drive Letter Logic)
+      - name: Extract install.esd from Win11 x64 ISO (Fixed Drive Letter)
         run: |
           Write-Host "Finding Win11 x64 ISO file..."
           $isoFile = Get-ChildItem -Path "./Win11_x64_Extract" -Filter *.iso -Recurse | Select-Object -First 1
@@ -182,15 +209,28 @@ jobs:
             exit 1
           }
           Write-Host "Mounting ISO: $($isoFile.FullName)"
+          
           Mount-DiskImage -ImagePath $isoFile.FullName -PassThru | Out-Null
+          Start-Sleep -Seconds 5
           $diskImage = Get-DiskImage -ImagePath $isoFile.FullName
-          $diskNumber = $diskImage.Number
-          $partition = Get-Partition -DiskNumber $diskNumber | Where-Object {$_.Type -eq 'Basic'}
-          $driveLetter = $partition.DriveLetter
+          $volume = Get-Volume -DiskImage $diskImage | Where-Object { $null -ne $_.DriveLetter }
+          if (-not $volume) {
+            Write-Error "Failed to get drive letter for mounted ISO!"
+            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
+            exit 1
+          }
+          $driveLetter = $volume.DriveLetter
           $isoRootPath = "$driveLetter`:\"
           Write-Host "ISO mounted to drive: $isoRootPath"
+          
+          $esdPath = Join-Path -Path $isoRootPath -ChildPath "sources\install.esd"
+          if (-not (Test-Path -Path $esdPath)) {
+            Write-Error "install.esd not found at $esdPath!"
+            Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
+            exit 1
+          }
           Write-Host "Extracting install.esd from ISO root: $isoRootPath"
-          Copy-Item -Path "$isoRootPath\sources\install.esd" -Destination "./install_11.esd" -Force
+          Copy-Item -Path $esdPath -Destination "./install_11.esd" -Force
           Write-Host "install.esd extracted successfully"
           Dismount-DiskImage -ImagePath $isoFile.FullName | Out-Null
 
@@ -225,14 +265,13 @@ jobs:
       # ========== 转换WIM到高压缩ESD ==========
       - name: Convert WIM to high-compression ESD
         run: |
-          Write-Host "Converting Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim to Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd (high compression)..."
-          # 导出第一个映像到ESD（高压缩）
+          Write-Host "Converting Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim to Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd..."
           dism /export-image /sourceimagefile:./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim /sourceindex:1 /destinationimagefile:./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd /compress:recovery /checkintegrity
           if ($LASTEXITCODE -ne 0) {
             Write-Error "DISM export failed for ESD index 1!"
             exit 1
           }
-          # 获取WIM中所有映像索引并循环导出
+          
           $wimInfo = dism /get-imageinfo /imagefile:./Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim
           $indexes = ($wimInfo | Select-String -Pattern "Image Index: (\d+)").Matches | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -ne 1 }
           foreach ($index in $indexes) {
