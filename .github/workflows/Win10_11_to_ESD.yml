@@ -17,7 +17,7 @@ env:
   # 真正的curl路径（解决PowerShell别名问题）
   CURL_PATH: "C:\\Program Files\\Git\\mingw64\\bin\\curl.exe"
 
-  # Win10 x86 LTSC2021 7z分卷下载链接
+  # Win10 x86 LTSC2021 7z分卷下载链接（确保无多余空行）
   WIN10_X86_URLS: |
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
@@ -70,33 +70,51 @@ jobs:
         run: |
           Write-Host "=== Processing Win10 x86 LTSC2021 ==="
           
-          # 1. 下载7z分卷（使用真正的curl.exe）
-          $urls = $env:WIN10_X86_URLS -split "`n" | ForEach-Object { $_.Trim() }
+          # 1. 下载7z分卷（过滤空URL，增加参数校验）
+          $urls = $env:WIN10_X86_URLS -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+          if ($urls.Count -eq 0) {
+            throw "No valid URLs found for Win10 x86 LTSC2021"
+          }
+          
           foreach ($url in $urls) {
+            # 校验URL非空
+            if ([string]::IsNullOrEmpty($url)) {
+              Write-Warning "Skipping empty URL"
+              continue
+            }
+            
+            # 获取文件名并校验非空
             $filename = [System.IO.Path]::GetFileName($url)
+            if ([string]::IsNullOrEmpty($filename)) {
+              throw "Failed to extract filename from URL: $url"
+            }
+            
             Write-Host "Downloading $filename from $url"
             & $env:CURL_PATH -L -o "$filename" "$url"
-            if (-not (Test-Path $filename)) {
-              throw "Failed to download $filename"
+            
+            # 校验文件是否下载成功
+            if (-not (Test-Path $filename -PathType Leaf)) {
+              throw "Failed to download $filename (file not found after download)"
             }
+            Write-Host "Successfully downloaded $filename"
           }
           
           # 2. 解压7z分卷
           $7zFiles = Get-ChildItem -Path *.7z.001 | Select-Object -First 1
-          if (-not $7zFiles) { throw "7z split files not found" }
+          if (-not $7zFiles) { throw "7z split files not found (Win10 x86)" }
           $7zBaseName = $7zFiles.BaseName -replace '\.7z$', ''
           Write-Host "Extracting 7z files to ISO: $7zBaseName"
           7z x -y "$($7zFiles.FullName)" -o"." | Out-Host
           
           # 3. 找到解压后的ISO文件
           $isoFile = Get-ChildItem -Path *.iso | Select-Object -First 1
-          if (-not $isoFile) { throw "ISO file not found after extraction" }
+          if (-not $isoFile) { throw "ISO file not found after extraction (Win10 x86)" }
           Write-Host "Found ISO file: $($isoFile.FullName)"
           
           # 4. 解压ISO中的sources\install.esd
           Write-Host "Extracting install.esd from ISO"
           7z x -y "$($isoFile.FullName)" "sources\install.esd" -o"." | Out-Host
-          if (-not (Test-Path "install.esd")) { throw "install.esd not extracted from ISO" }
+          if (-not (Test-Path "install.esd" -PathType Leaf)) { throw "install.esd not extracted from ISO (Win10 x86)" }
           
           # 5. 提取install.esd第一个映像到目标WIM
           Write-Host "Exporting first image from install.esd to $($env:TARGET_WIM_NAME)"
@@ -119,30 +137,45 @@ jobs:
         run: |
           Write-Host "=== Processing Win10 x64 LTSC2021 ==="
           
-          # 1. 下载7z分卷（使用真正的curl.exe）
-          $urls = $env:WIN10_X64_URLS -split "`n" | ForEach-Object { $_.Trim() }
+          # 1. 下载7z分卷（过滤空URL，增加参数校验）
+          $urls = $env:WIN10_X64_URLS -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+          if ($urls.Count -eq 0) {
+            throw "No valid URLs found for Win10 x64 LTSC2021"
+          }
+          
           foreach ($url in $urls) {
+            if ([string]::IsNullOrEmpty($url)) {
+              Write-Warning "Skipping empty URL"
+              continue
+            }
+            
             $filename = [System.IO.Path]::GetFileName($url)
+            if ([string]::IsNullOrEmpty($filename)) {
+              throw "Failed to extract filename from URL: $url"
+            }
+            
             Write-Host "Downloading $filename from $url"
             & $env:CURL_PATH -L -o "$filename" "$url"
-            if (-not (Test-Path $filename)) {
-              throw "Failed to download $filename"
+            
+            if (-not (Test-Path $filename -PathType Leaf)) {
+              throw "Failed to download $filename (file not found after download)"
             }
+            Write-Host "Successfully downloaded $filename"
           }
           
           # 2. 解压7z分卷
           $7zFiles = Get-ChildItem -Path *.7z.001 | Select-Object -First 1
-          if (-not $7zFiles) { throw "7z split files not found" }
+          if (-not $7zFiles) { throw "7z split files not found (Win10 x64)" }
           $7zBaseName = $7zFiles.BaseName -replace '\.7z$', ''
           Write-Host "Extracting 7z files to ISO: $7zBaseName"
           7z x -y "$($7zFiles.FullName)" -o"." | Out-Host
           
           # 3. 找到ISO并解压install.esd
           $isoFile = Get-ChildItem -Path *.iso | Select-Object -First 1
-          if (-not $isoFile) { throw "ISO file not found after extraction" }
+          if (-not $isoFile) { throw "ISO file not found after extraction (Win10 x64)" }
           Write-Host "Extracting install.esd from ISO: $($isoFile.FullName)"
           7z x -y "$($isoFile.FullName)" "sources\install.esd" -o"." | Out-Host
-          if (-not (Test-Path "install.esd")) { throw "install.esd not extracted from ISO" }
+          if (-not (Test-Path "install.esd" -PathType Leaf)) { throw "install.esd not extracted from ISO (Win10 x64)" }
           
           # 4. 提取第一个映像到临时install.wim
           Write-Host "Exporting first image from install.esd to temp install.wim"
@@ -174,30 +207,45 @@ jobs:
         run: |
           Write-Host "=== Processing Win11 x64 LTSC2024 ==="
           
-          # 1. 下载7z分卷（使用真正的curl.exe）
-          $urls = $env:WIN11_X64_URLS -split "`n" | ForEach-Object { $_.Trim() }
+          # 1. 下载7z分卷（过滤空URL，增加参数校验）
+          $urls = $env:WIN11_X64_URLS -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+          if ($urls.Count -eq 0) {
+            throw "No valid URLs found for Win11 x64 LTSC2024"
+          }
+          
           foreach ($url in $urls) {
+            if ([string]::IsNullOrEmpty($url)) {
+              Write-Warning "Skipping empty URL"
+              continue
+            }
+            
             $filename = [System.IO.Path]::GetFileName($url)
+            if ([string]::IsNullOrEmpty($filename)) {
+              throw "Failed to extract filename from URL: $url"
+            }
+            
             Write-Host "Downloading $filename from $url"
             & $env:CURL_PATH -L -o "$filename" "$url"
-            if (-not (Test-Path $filename)) {
-              throw "Failed to download $filename"
+            
+            if (-not (Test-Path $filename -PathType Leaf)) {
+              throw "Failed to download $filename (file not found after download)"
             }
+            Write-Host "Successfully downloaded $filename"
           }
           
           # 2. 解压7z分卷
           $7zFiles = Get-ChildItem -Path *.7z.001 | Select-Object -First 1
-          if (-not $7zFiles) { throw "7z split files not found" }
+          if (-not $7zFiles) { throw "7z split files not found (Win11 x64)" }
           $7zBaseName = $7zFiles.BaseName -replace '\.7z$', ''
           Write-Host "Extracting 7z files to ISO: $7zBaseName"
           7z x -y "$($7zFiles.FullName)" -o"." | Out-Host
           
           # 3. 找到ISO并解压install.esd
           $isoFile = Get-ChildItem -Path *.iso | Select-Object -First 1
-          if (-not $isoFile) { throw "ISO file not found after extraction" }
+          if (-not $isoFile) { throw "ISO file not found after extraction (Win11 x64)" }
           Write-Host "Extracting install.esd from ISO: $($isoFile.FullName)"
           7z x -y "$($isoFile.FullName)" "sources\install.esd" -o"." | Out-Host
-          if (-not (Test-Path "install.esd")) { throw "install.esd not extracted from ISO" }
+          if (-not (Test-Path "install.esd" -PathType Leaf)) { throw "install.esd not extracted from ISO (Win11 x64)" }
           
           # 4. 提取第一个映像到临时install.wim
           Write-Host "Exporting first image from install.esd to temp install.wim"
@@ -228,7 +276,7 @@ jobs:
       - name: Convert WIM to ESD (high compression)
         run: |
           Write-Host "=== Converting WIM to ESD ==="
-          if (-not (Test-Path $env:TARGET_WIM_NAME)) {
+          if (-not (Test-Path $env:TARGET_WIM_NAME -PathType Leaf)) {
             throw "Target WIM file $($env:TARGET_WIM_NAME) not found"
           }
           
@@ -241,7 +289,7 @@ jobs:
             /checkintegrity
           
           # 验证ESD文件生成
-          if (-not (Test-Path $env:TARGET_ESD_NAME)) {
+          if (-not (Test-Path $env:TARGET_ESD_NAME -PathType Leaf)) {
             throw "ESD conversion failed: $($env:TARGET_ESD_NAME) not created"
           }
           
@@ -253,7 +301,7 @@ jobs:
       - name: Split ESD with 7z (1950M per volume)
         run: |
           Write-Host "=== Splitting ESD into $($env:SPLIT_SIZE) volumes ==="
-          if (-not (Test-Path $env:TARGET_ESD_NAME)) {
+          if (-not (Test-Path $env:TARGET_ESD_NAME -PathType Leaf)) {
             throw "ESD file $($env:TARGET_ESD_NAME) not found"
           }
           
@@ -261,7 +309,7 @@ jobs:
           7z a -y -t7z -mx=9 -v$($env:SPLIT_SIZE) "$($env:TARGET_ESD_NAME).7z" "$($env:TARGET_ESD_NAME)" | Out-Host
           
           # 验证分卷生成
-          $splitFiles = Get-ChildItem -Path "$($env:TARGET_ESD_NAME).7z.*"
+          $splitFiles = Get-ChildItem -Path "$($env:TARGET_ESD_NAME).7z.*" -PathType Leaf
           if (-not $splitFiles) {
             throw "7z split volumes not created"
           }
