@@ -32,13 +32,12 @@ env:
   WIN11_X64_VOL2: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
   WIN11_X64_VOL3: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
 
-# 第三层：PowerShell版执行代码
+# 第三层：PowerShell版执行代码（修复curl参数问题）
 jobs:
   build_and_release:
     runs-on: windows-latest
     defaults:
       run:
-        # 核心修改：切换为PowerShell（避免CMD注释符/语法问题）
         shell: powershell
         working-directory: ${{ github.workspace }}
     steps:
@@ -49,28 +48,38 @@ jobs:
           # 创建工作目录（Force参数：存在则不报错，不存在则创建）
           New-Item -Path $env:WORK_DIR -ItemType Directory -Force | Out-Null
           New-Item -Path "$env:WORK_DIR\temp" -ItemType Directory -Force | Out-Null
-          # 验证基础工具可用性
+          # 验证基础工具可用性（包括原生curl）
           try {
+            # 验证7z
             7z --version | Out-Null
+            # 验证DISM
             dism /? | Out-Null
+            # 验证原生curl.exe
+            curl.exe --version | Out-Null
             Write-Host "Environment initialized successfully"
           }
           catch {
-            Write-Error "7z or DISM tool not found!"
+            Write-Error "7z/DISM/curl tool not found!"
             exit 1
           }
 
-      # 步骤2：处理Win10 x86 LTSC2021
+      # 步骤2：处理Win10 x86 LTSC2021（修复curl为curl.exe）
       - name: Process Win10 x86 LTSC2021
         run: |
           Write-Host "=== Processing Win10 x86 LTSC2021 ==="
           # 切换到工作目录
           Set-Location $env:WORK_DIR
           
-          # 下载7z分卷（curl带进度+速度，PowerShell中curl是Invoke-WebRequest别名）
+          # 下载7z分卷（调用原生curl.exe，支持进度+速度参数）
           Write-Host "Downloading 7z volumes..."
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X86_VOL1
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X86_VOL2
+          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X86_VOL1
+          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X86_VOL2
+          
+          # 验证下载文件是否存在
+          if (-not (Test-Path "Windows10_LTSC2021_x86-19044.6811.7z.001")) {
+            Write-Error "Win10 x86 7z volume 1 download failed!"
+            exit 1
+          }
           
           # 解压7z分卷（自动识别后续分卷）
           Write-Host "Extracting 7z volumes..."
@@ -84,6 +93,12 @@ jobs:
           }
           else {
             Write-Error "ISO file not found in extracted 7z archive!"
+            exit 1
+          }
+          
+          # 验证install.esd是否存在
+          if (-not (Test-Path ".\temp\esd\sources\install.esd")) {
+            Write-Error "install.esd not found in ISO!"
             exit 1
           }
           
@@ -104,17 +119,23 @@ jobs:
           
           Write-Host "Win10 x86 LTSC2021 processed successfully"
 
-      # 步骤3：处理Win10 x64 LTSC2021
+      # 步骤3：处理Win10 x64 LTSC2021（修复curl为curl.exe）
       - name: Process Win10 x64 LTSC2021
         run: |
           Write-Host "=== Processing Win10 x64 LTSC2021 ==="
           Set-Location $env:WORK_DIR
           
-          # 下载7z分卷
+          # 下载7z分卷（原生curl.exe）
           Write-Host "Downloading 7z volumes..."
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X64_VOL1
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X64_VOL2
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X64_VOL3
+          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X64_VOL1
+          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X64_VOL2
+          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN10_X64_VOL3
+          
+          # 验证下载文件
+          if (-not (Test-Path "Windows10_LTSC2021_amd64-19044.6811.7z.001")) {
+            Write-Error "Win10 x64 7z volume 1 download failed!"
+            exit 1
+          }
           
           # 解压7z分卷
           Write-Host "Extracting 7z volumes..."
@@ -128,6 +149,12 @@ jobs:
           }
           else {
             Write-Error "ISO file not found in extracted 7z archive!"
+            exit 1
+          }
+          
+          # 验证install.esd
+          if (-not (Test-Path ".\temp\esd\sources\install.esd")) {
+            Write-Error "install.esd not found in ISO!"
             exit 1
           }
           
@@ -148,17 +175,23 @@ jobs:
           
           Write-Host "Win10 x64 LTSC2021 processed successfully"
 
-      # 步骤4：处理Win11 x64 LTSC2024
+      # 步骤4：处理Win11 x64 LTSC2024（修复curl为curl.exe）
       - name: Process Win11 x64 LTSC2024
         run: |
           Write-Host "=== Processing Win11 x64 LTSC2024 ==="
           Set-Location $env:WORK_DIR
           
-          # 下载7z分卷
+          # 下载7z分卷（原生curl.exe）
           Write-Host "Downloading 7z volumes..."
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN11_X64_VOL1
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN11_X64_VOL2
-          curl -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN11_X64_VOL3
+          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN11_X64_VOL1
+          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN11_X64_VOL2
+          curl.exe -L --progress-bar -w "Download speed: %{speed_download} B/s`n" -O $env:WIN11_X64_VOL3
+          
+          # 验证下载文件
+          if (-not (Test-Path "Windows11_LTSC2024_amd64-26200.7627.7z.001")) {
+            Write-Error "Win11 x64 7z volume 1 download failed!"
+            exit 1
+          }
           
           # 解压7z分卷
           Write-Host "Extracting 7z volumes..."
@@ -172,6 +205,12 @@ jobs:
           }
           else {
             Write-Error "ISO file not found in extracted 7z archive!"
+            exit 1
+          }
+          
+          # 验证install.esd
+          if (-not (Test-Path ".\temp\esd\sources\install.esd")) {
+            Write-Error "install.esd not found in ISO!"
             exit 1
           }
           
@@ -197,6 +236,12 @@ jobs:
           Write-Host "=== Converting WIM to ESD (recovery compression) ==="
           Set-Location $env:WORK_DIR
           
+          # 验证WIM文件存在
+          if (-not (Test-Path $env:TARGET_WIM)) {
+            Write-Error "Target WIM file not found!"
+            exit 1
+          }
+          
           # 高压缩转换为ESD（recovery级别是ESD最高压缩）
           dism /export-image `
             /sourceimagefile:$env:TARGET_WIM `
@@ -212,6 +257,12 @@ jobs:
         run: |
           Write-Host "=== Splitting ESD to $env:SPLIT_SIZE volumes ==="
           Set-Location $env:WORK_DIR
+          
+          # 验证ESD文件存在
+          if (-not (Test-Path $env:TARGET_ESD)) {
+            Write-Error "Target ESD file not found!"
+            exit 1
+          }
           
           # 7z分卷压缩（-mx=9最高压缩，-v指定分卷大小）
           7z a -t7z -mx=9 -v$env:SPLIT_SIZE "$env:TARGET_ESD.7z" $env:TARGET_ESD | Out-Null
