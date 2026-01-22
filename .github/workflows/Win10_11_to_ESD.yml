@@ -50,6 +50,9 @@ jobs:
       run: |
         cd workdir
         7z x Windows10_LTSC2021_x86-19044.6811.7z.001 -oWindows10_x86_iso
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract Windows 10 x86 archive"
+        }
         
     - name: Find and extract ISO file
       run: |
@@ -100,7 +103,8 @@ jobs:
                 cd extracted_esd
                 if (Test-Path "install.esd") {
                     # Export first image to new WIM file
-                    dism /Export-Image /SourceImageFile:install.esd /SourceIndex:1 /DestinationImageFile:..\..\..\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim /Compress:max
+                    $destWim = "..\..\..\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
+                    dism /Export-Image /SourceImageFile:install.esd /SourceIndex:1 /DestinationImageFile:$destWim /Compress:max
                     if ($LASTEXITCODE -ne 0) {
                         throw "Failed to export WIM image"
                     }
@@ -121,7 +125,8 @@ jobs:
         Remove-Item Windows10_LTSC2021_x86-19044.6811.7z.001 -Force
         Remove-Item Windows10_LTSC2021_x86-19044.6811.7z.002 -Force
         Remove-Item Windows10_x86_iso -Recurse -Force
-        if (Test-Path "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim") {
+        $wimFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
+        if (Test-Path $wimFile) {
             Write-Host "Initial WIM created successfully"
         }
         
@@ -145,6 +150,9 @@ jobs:
       run: |
         cd workdir
         7z x Windows10_LTSC2021_amd64-19044.6811.7z.001 -oWindows10_amd64_iso
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract Windows 10 amd64 archive"
+        }
         
     - name: Find and extract ISO file for amd64
       run: |
@@ -203,7 +211,8 @@ jobs:
                     # Verify temporary WIM was created
                     if (Test-Path "install.wim") {
                         # Append to existing WIM file
-                        dism /Export-Image /SourceImageFile:install.wim /SourceIndex:1 /DestinationImageFile:..\..\..\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim /DestinationName:"Windows 10 LTSC 2021 amd64" /Compress:max
+                        $destWim = "..\..\..\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
+                        dism /Export-Image /SourceImageFile:install.wim /SourceIndex:1 /DestinationImageFile:$destWim /DestinationName:"Windows 10 LTSC 2021 amd64" /Compress:max
                         if ($LASTEXITCODE -ne 0) {
                             throw "Failed to append WIM image"
                         }
@@ -250,6 +259,9 @@ jobs:
       run: |
         cd workdir
         7z x Windows11_LTSC2024_amd64-26200.7627.7z.001 -oWindows11_amd64_iso
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract Windows 11 amd64 archive"
+        }
         
     - name: Find and extract ISO file for Windows 11
       run: |
@@ -308,7 +320,8 @@ jobs:
                     # Verify temporary WIM was created
                     if (Test-Path "install.wim") {
                         # Append to existing WIM file
-                        dism /Export-Image /SourceImageFile:install.wim /SourceIndex:1 /DestinationImageFile:..\..\..\Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim /DestinationName:"Windows 11 LTSC 2024 amd64" /Compress:max
+                        $destWim = "..\..\..\Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
+                        dism /Export-Image /SourceImageFile:install.wim /SourceIndex:1 /DestinationImageFile:$destWim /DestinationName:"Windows 11 LTSC 2024 amd64" /Compress:max
                         if ($LASTEXITCODE -ne 0) {
                             throw "Failed to append WIM image"
                         }
@@ -340,20 +353,22 @@ jobs:
       run: |
         cd workdir
         # Verify source WIM file exists
-        if (-not (Test-Path "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim")) {
+        $wimFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
+        if (-not (Test-Path $wimFile)) {
             throw "Source WIM file not found"
         }
         
         Write-Host "Converting WIM to ESD with maximum compression..."
-        dism /Export-Image /SourceImageFile:Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim /SourceIndex:* /DestinationImageFile:Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd /Compress:recovery /CheckIntegrity
+        $esdFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
+        dism /Export-Image /SourceImageFile:$wimFile /SourceIndex:* /DestinationImageFile:$esdFile /Compress:recovery /CheckIntegrity
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to convert WIM to ESD"
         }
         
         # Verify ESD file was created
-        if (Test-Path "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd") {
+        if (Test-Path $esdFile) {
             Write-Host "Successfully converted to ESD format"
-            $esdSize = (Get-Item "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd").Length
+            $esdSize = (Get-Item $esdFile).Length
             Write-Host "ESD file size: $($esdSize / 1GB) GB"
         } else {
             throw "ESD file was not created"
@@ -363,18 +378,26 @@ jobs:
       run: |
         cd workdir
         # Verify ESD file exists before splitting
-        if (-not (Test-Path "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd")) {
+        $esdFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.esd"
+        if (-not (Test-Path $esdFile)) {
             throw "ESD file not found for splitting"
         }
         
         Write-Host "Splitting ESD file into 1950MB volumes..."
-        7z a -v1950M Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.esd
+        $outputArchive = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.7z"
+        7z a -v1950M $outputArchive $esdFile
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to split ESD file"
         }
         
+        Write-Host "Verifying split archive integrity..."
+        7z t $outputArchive.001
+        if ($LASTEXITCODE -ne 0) {
+            throw "Split archive integrity check failed"
+        }
+        
         # Verify split files were created
-        $splitFiles = Get-ChildItem -Path . -Filter "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z.*"
+        $splitFiles = Get-ChildItem -Path . -Filter "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.7z.*"
         if ($splitFiles -and $splitFiles.Count -gt 0) {
             Write-Host "Created $($splitFiles.Count) volume files:"
             foreach ($file in $splitFiles) {
@@ -390,6 +413,6 @@ jobs:
         name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
         tag_name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
         files: |
-          workdir/Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.7z.*
+          workdir/Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.7z.*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
