@@ -17,7 +17,7 @@ env:
   # 真正的curl路径（解决PowerShell别名问题）
   CURL_PATH: "C:\\Program Files\\Git\\mingw64\\bin\\curl.exe"
 
-  # Win10 x86 LTSC2021 7z分卷下载链接（确保无多余空行）
+  # Win10 x86 LTSC2021 7z分卷下载链接
   WIN10_X86_URLS: |
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
     https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
@@ -111,10 +111,31 @@ jobs:
           if (-not $isoFile) { throw "ISO file not found after extraction (Win10 x86)" }
           Write-Host "Found ISO file: $($isoFile.FullName)"
           
-          # 4. 解压ISO中的sources\install.esd
-          Write-Host "Extracting install.esd from ISO"
-          7z x -y "$($isoFile.FullName)" "sources\install.esd" -o"." | Out-Host
-          if (-not (Test-Path "install.esd" -PathType Leaf)) { throw "install.esd not extracted from ISO (Win10 x86)" }
+          # 4. 解压ISO中的install.esd（核心修复：兼容大小写+递归查找）
+          Write-Host "Listing ISO content to find install.esd path..."
+          # 先列出ISO内的文件，定位正确的install.esd路径（输出日志便于排查）
+          7z l "$($isoFile.FullName)" | Select-String -Pattern "install\.esd|INSTALL\.ESD" | Out-Host
+          
+          Write-Host "Extracting install.esd from ISO (case-insensitive)..."
+          # 解压时忽略大小写，递归查找sources目录下的install.esd
+          7z x -y -r "$($isoFile.FullName)" "*/sources/install.esd" -o"." | Out-Host
+          # 备用方案：如果上面没找到，尝试大写路径
+          if (-not (Test-Path "install.esd" -PathType Leaf)) {
+            7z x -y -r "$($isoFile.FullName)" "*/SOURCES/INSTALL.ESD" -o"." | Out-Host
+          }
+          
+          # 校验install.esd是否存在（兼容可能的路径层级）
+          $esdFile = Get-ChildItem -Path . -Recurse -Name "install.esd" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($esdFile) {
+            # 如果esd在子目录，移动到当前目录
+            Move-Item -Path $esdFile -Destination ".\install.esd" -Force
+            Write-Host "Found install.esd at $esdFile, moved to current directory"
+          }
+          
+          # 最终校验
+          if (-not (Test-Path "install.esd" -PathType Leaf)) {
+            throw "install.esd not extracted from ISO (Win10 x86)"
+          }
           
           # 5. 提取install.esd第一个映像到目标WIM
           Write-Host "Exporting first image from install.esd to $($env:TARGET_WIM_NAME)"
@@ -170,12 +191,30 @@ jobs:
           Write-Host "Extracting 7z files to ISO: $7zBaseName"
           7z x -y "$($7zFiles.FullName)" -o"." | Out-Host
           
-          # 3. 找到ISO并解压install.esd
+          # 3. 找到ISO并解压install.esd（兼容大小写+递归查找）
           $isoFile = Get-ChildItem -Path *.iso | Select-Object -First 1
           if (-not $isoFile) { throw "ISO file not found after extraction (Win10 x64)" }
-          Write-Host "Extracting install.esd from ISO: $($isoFile.FullName)"
-          7z x -y "$($isoFile.FullName)" "sources\install.esd" -o"." | Out-Host
-          if (-not (Test-Path "install.esd" -PathType Leaf)) { throw "install.esd not extracted from ISO (Win10 x64)" }
+          Write-Host "Found ISO file: $($isoFile.FullName)"
+          
+          Write-Host "Listing ISO content to find install.esd path..."
+          7z l "$($isoFile.FullName)" | Select-String -Pattern "install\.esd|INSTALL\.ESD" | Out-Host
+          
+          Write-Host "Extracting install.esd from ISO (case-insensitive)..."
+          7z x -y -r "$($isoFile.FullName)" "*/sources/install.esd" -o"." | Out-Host
+          if (-not (Test-Path "install.esd" -PathType Leaf)) {
+            7z x -y -r "$($isoFile.FullName)" "*/SOURCES/INSTALL.ESD" -o"." | Out-Host
+          }
+          
+          # 校验并移动install.esd到当前目录
+          $esdFile = Get-ChildItem -Path . -Recurse -Name "install.esd" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($esdFile) {
+            Move-Item -Path $esdFile -Destination ".\install.esd" -Force
+            Write-Host "Found install.esd at $esdFile, moved to current directory"
+          }
+          
+          if (-not (Test-Path "install.esd" -PathType Leaf)) {
+            throw "install.esd not extracted from ISO (Win10 x64)"
+          }
           
           # 4. 提取第一个映像到临时install.wim
           Write-Host "Exporting first image from install.esd to temp install.wim"
@@ -240,12 +279,30 @@ jobs:
           Write-Host "Extracting 7z files to ISO: $7zBaseName"
           7z x -y "$($7zFiles.FullName)" -o"." | Out-Host
           
-          # 3. 找到ISO并解压install.esd
+          # 3. 找到ISO并解压install.esd（兼容大小写+递归查找）
           $isoFile = Get-ChildItem -Path *.iso | Select-Object -First 1
           if (-not $isoFile) { throw "ISO file not found after extraction (Win11 x64)" }
-          Write-Host "Extracting install.esd from ISO: $($isoFile.FullName)"
-          7z x -y "$($isoFile.FullName)" "sources\install.esd" -o"." | Out-Host
-          if (-not (Test-Path "install.esd" -PathType Leaf)) { throw "install.esd not extracted from ISO (Win11 x64)" }
+          Write-Host "Found ISO file: $($isoFile.FullName)"
+          
+          Write-Host "Listing ISO content to find install.esd path..."
+          7z l "$($isoFile.FullName)" | Select-String -Pattern "install\.esd|INSTALL\.ESD" | Out-Host
+          
+          Write-Host "Extracting install.esd from ISO (case-insensitive)..."
+          7z x -y -r "$($isoFile.FullName)" "*/sources/install.esd" -o"." | Out-Host
+          if (-not (Test-Path "install.esd" -PathType Leaf)) {
+            7z x -y -r "$($isoFile.FullName)" "*/SOURCES/INSTALL.ESD" -o"." | Out-Host
+          }
+          
+          # 校验并移动install.esd到当前目录
+          $esdFile = Get-ChildItem -Path . -Recurse -Name "install.esd" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($esdFile) {
+            Move-Item -Path $esdFile -Destination ".\install.esd" -Force
+            Write-Host "Found install.esd at $esdFile, moved to current directory"
+          }
+          
+          if (-not (Test-Path "install.esd" -PathType Leaf)) {
+            throw "install.esd not extracted from ISO (Win11 x64)"
+          }
           
           # 4. 提取第一个映像到临时install.wim
           Write-Host "Exporting first image from install.esd to temp install.wim"
