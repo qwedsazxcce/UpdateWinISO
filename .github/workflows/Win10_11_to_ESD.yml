@@ -1,17 +1,5 @@
 name: Windows_10-11_ESD
 
-on:
-  workflow_dispatch:
-    inputs:
-      skip_download_extract:
-        description: '是否跳过下载和解压步骤（true=跳过，false=不跳过）'
-        required: true
-        default: 'false'
-        type: boolean
-  schedule:
-    # 每月1号运行（可选）
-    - cron: '0 0 1 * *'
-
 env:
   # 下载地址（可根据需要替换）
   WIN10_X86_URL_1: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
