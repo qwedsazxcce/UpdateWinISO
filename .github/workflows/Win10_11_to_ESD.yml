@@ -4,6 +4,7 @@ env:
   # Download URL environment variables - for easy replacement later
   WIN10_X86_URL_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
   WIN10_X86_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
+  WIN10_X86_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/test.txt
   WIN10_AMD64_URL_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001
   WIN10_AMD64_URL_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002
   WIN10_AMD64_URL_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
@@ -64,6 +65,11 @@ jobs:
       run: |
         cd workdir
         curl -L -o Windows10_LTSC2021_x86.7z.002 ${{ env.WIN10_X86_URL_002 }}
+    
+    - name: Download Windows 10 x86 LTSC 2021 part 3
+      run: |
+        cd workdir
+        curl -L -o Windows10_LTSC2021_x86.7z.003 ${{ env.WIN10_X86_URL_003 }}
         
     - name: Extract Windows 10 x86 LTSC 2021 archive
       run: |
@@ -143,6 +149,7 @@ jobs:
         cd workdir
         Remove-Item Windows10_LTSC2021_x86.7z.001 -Force
         Remove-Item Windows10_LTSC2021_x86.7z.002 -Force
+        Remove-Item Windows10_LTSC2021_x86.7z.003 -Force
         Remove-Item Windows10_x86 -Recurse -Force
         $wimFile = "Windows10_LTSC_2021_32`&64_Windows_11_LTSC_2025.wim"
         if (Test-Path $wimFile) {
@@ -461,6 +468,29 @@ jobs:
             throw "No split volume files were created"
         }
         
+    # Delete existing release and tag if they exist
+    - name: Delete existing release and tag
+      run: |
+        # Check if release exists and delete it
+        $releaseExists = gh release view Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025 --json id --jq ".id" 2>$null
+        if ($releaseExists) {
+            Write-Host "Deleting existing release Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025"
+            gh release delete Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025 --cleanup-tag --yes
+        } else {
+            Write-Host "No existing release found, proceeding..."
+        }
+        
+        # Check if tag exists and delete it
+        $tagExists = git ls-remote --tags origin Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025 2>$null
+        if ($tagExists) {
+            Write-Host "Deleting existing tag Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025"
+            git push origin --delete refs/tags/Windows10_LTSC_2021_32^&64_Windows_11_LTSC_2025
+        } else {
+            Write-Host "No existing tag found, proceeding..."
+        }
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
     - name: Upload release assets
       uses: softprops/action-gh-release@v1
       with:
@@ -471,6 +501,6 @@ jobs:
         draft: false
         prerelease: false
         make_latest: true
-        overwrite: true
+        overwrite: false  # Now set to false since we've already deleted the previous release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
