@@ -281,7 +281,7 @@ jobs:
                 # Add first image from x64 install.esd to existing WIM
                 Write-Output "Adding first image from x64 install.esd to existing WIM..."
                 $dismLog = "$env:TEMP\x64_dism_append.log"
-                dism /Append-Image /ImageFile:"$env:OUTPUT_WIM_NAME" /SourceImageFile:"x64_install.esd" /SourceIndex:1 /Name:"Windows 10 x64 LTSC 2021" /CheckIntegrity /LogPath:$dismLog
+                dism /Export-Image /SourceImageFile:"x64_install.esd" /SourceIndex:1 /DestinationImageFile:"$env:OUTPUT_WIM_NAME" /Compress:fast /CheckIntegrity /Append /LogPath:$dismLog
                         
                 # Check if DISM command succeeded
                 if ($LASTEXITCODE -ne 0) {
@@ -420,7 +420,7 @@ jobs:
                 # Add first image from Win11 install.esd to existing WIM
                 Write-Output "Adding first image from Win11 install.esd to existing WIM..."
                 $dismLog = "$env:TEMP\win11_dism_append.log"
-                dism /Append-Image /ImageFile:"$env:OUTPUT_WIM_NAME" /SourceImageFile:"win11_install.esd" /SourceIndex:1 /Name:"Windows 11 x64 LTSC 2024" /CheckIntegrity /LogPath:$dismLog
+                dism /Export-Image /SourceImageFile:"win11_install.esd" /SourceIndex:1 /DestinationImageFile:"$env:OUTPUT_WIM_NAME" /Compress:fast /CheckIntegrity /Append /LogPath:$dismLog
                         
                 # Check if DISM command succeeded
                 if ($LASTEXITCODE -ne 0) {
