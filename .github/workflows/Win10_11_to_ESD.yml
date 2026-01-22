@@ -1,18 +1,10 @@
 name: Windows_10-11_ESD
 
-# 核心新增：定义工作流触发条件（解决 No event triggers defined 错误）
+# 定义工作流触发条件
 on:
-  # 手动触发（最推荐，在GitHub页面手动点击运行）
   workflow_dispatch:
-  # 可选：代码推送到main分支时触发（如需自动触发可保留，不需要则删除）
-  # push:
-  #   branches: [ main ]
-  # 可选：定时触发（每天UTC时间0点执行，如需定时则保留，不需要则删除）
-  # schedule:
-  #   - cron: '0 0 * * *'
 
-
-# 环境变量：集中管理下载链接和关键文件名，方便后续替换
+# 环境变量：集中管理下载链接和关键文件名
 env:
   # 核心目标文件名
   TARGET_WIM_NAME: "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025.wim"
@@ -21,6 +13,9 @@ env:
   
   # 分卷大小（1950MB）
   SPLIT_SIZE: "1950M"
+
+  # 真正的curl路径（解决PowerShell别名问题）
+  CURL_PATH: "C:\\Program Files\\Git\\mingw64\\bin\\curl.exe"
 
   # Win10 x86 LTSC2021 7z分卷下载链接
   WIN10_X86_URLS: |
@@ -49,14 +44,20 @@ jobs:
         working-directory: ${{ github.workspace }}
 
     steps:
-      # 步骤1：初始化环境（安装7zip、设置PowerShell编码避免非ASCII问题）
+      # 步骤1：初始化环境（验证curl路径、安装7zip、设置编码）
       - name: Initialize environment
         run: |
-          # 设置PowerShell输出编码为UTF8，避免字符串终止符/编码问题
+          # 设置PowerShell输出编码为UTF8
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::InputEncoding = [System.Text.Encoding]::UTF8
           
-          # 安装7zip（GitHub Windows镜像默认无7z，通过choco安装）
+          # 验证curl路径是否存在
+          if (-not (Test-Path $env:CURL_PATH)) {
+            throw "Real curl.exe not found at $($env:CURL_PATH)"
+          }
+          & $env:CURL_PATH --version
+          
+          # 安装7zip
           choco install 7zip -y --no-progress
           
           # 验证7z和DISM可用性
@@ -69,18 +70,18 @@ jobs:
         run: |
           Write-Host "=== Processing Win10 x86 LTSC2021 ==="
           
-          # 1. 下载7z分卷（保持文件名与链接一致）
+          # 1. 下载7z分卷（使用真正的curl.exe）
           $urls = $env:WIN10_X86_URLS -split "`n" | ForEach-Object { $_.Trim() }
           foreach ($url in $urls) {
             $filename = [System.IO.Path]::GetFileName($url)
             Write-Host "Downloading $filename from $url"
-            curl -L -o "$filename" "$url"
+            & $env:CURL_PATH -L -o "$filename" "$url"
             if (-not (Test-Path $filename)) {
               throw "Failed to download $filename"
             }
           }
           
-          # 2. 解压7z分卷（合并并解压）
+          # 2. 解压7z分卷
           $7zFiles = Get-ChildItem -Path *.7z.001 | Select-Object -First 1
           if (-not $7zFiles) { throw "7z split files not found" }
           $7zBaseName = $7zFiles.BaseName -replace '\.7z$', ''
@@ -97,7 +98,7 @@ jobs:
           7z x -y "$($isoFile.FullName)" "sources\install.esd" -o"." | Out-Host
           if (-not (Test-Path "install.esd")) { throw "install.esd not extracted from ISO" }
           
-          # 5. 提取install.esd第一个映像到目标WIM（首次创建）
+          # 5. 提取install.esd第一个映像到目标WIM
           Write-Host "Exporting first image from install.esd to $($env:TARGET_WIM_NAME)"
           dism /export-image `
             /sourceimagefile:install.esd `
@@ -106,7 +107,7 @@ jobs:
             /compress:max `
             /checkintegrity
           
-          # 6. 清理临时文件（7z分卷、ISO、install.esd）
+          # 6. 清理临时文件
           Write-Host "Cleaning temporary files for Win10 x86 LTSC2021"
           Remove-Item -Path *.7z.* -Force -ErrorAction SilentlyContinue
           Remove-Item -Path $isoFile.FullName -Force -ErrorAction SilentlyContinue
@@ -118,12 +119,12 @@ jobs:
         run: |
           Write-Host "=== Processing Win10 x64 LTSC2021 ==="
           
-          # 1. 下载7z分卷
+          # 1. 下载7z分卷（使用真正的curl.exe）
           $urls = $env:WIN10_X64_URLS -split "`n" | ForEach-Object { $_.Trim() }
           foreach ($url in $urls) {
             $filename = [System.IO.Path]::GetFileName($url)
             Write-Host "Downloading $filename from $url"
-            curl -L -o "$filename" "$url"
+            & $env:CURL_PATH -L -o "$filename" "$url"
             if (-not (Test-Path $filename)) {
               throw "Failed to download $filename"
             }
@@ -173,12 +174,12 @@ jobs:
         run: |
           Write-Host "=== Processing Win11 x64 LTSC2024 ==="
           
-          # 1. 下载7z分卷
+          # 1. 下载7z分卷（使用真正的curl.exe）
           $urls = $env:WIN11_X64_URLS -split "`n" | ForEach-Object { $_.Trim() }
           foreach ($url in $urls) {
             $filename = [System.IO.Path]::GetFileName($url)
             Write-Host "Downloading $filename from $url"
-            curl -L -o "$filename" "$url"
+            & $env:CURL_PATH -L -o "$filename" "$url"
             if (-not (Test-Path $filename)) {
               throw "Failed to download $filename"
             }
@@ -231,7 +232,7 @@ jobs:
             throw "Target WIM file $($env:TARGET_WIM_NAME) not found"
           }
           
-          # 转换WIM到ESD（ESD是高压缩格式，DISM专用参数）
+          # 转换WIM到ESD
           dism /export-image `
             /sourceimagefile:$($env:TARGET_WIM_NAME) `
             /sourceindex:1 `
@@ -244,7 +245,7 @@ jobs:
             throw "ESD conversion failed: $($env:TARGET_ESD_NAME) not created"
           }
           
-          # 清理原始WIM文件（释放空间）
+          # 清理原始WIM文件
           Remove-Item -Path $env:TARGET_WIM_NAME -Force -ErrorAction SilentlyContinue
           Write-Host "Successfully converted WIM to ESD: $($env:TARGET_ESD_NAME)"
 
@@ -256,7 +257,7 @@ jobs:
             throw "ESD file $($env:TARGET_ESD_NAME) not found"
           }
           
-          # 7z分卷压缩（-v指定分卷大小，-mx=9最高压缩）
+          # 7z分卷压缩
           7z a -y -t7z -mx=9 -v$($env:SPLIT_SIZE) "$($env:TARGET_ESD_NAME).7z" "$($env:TARGET_ESD_NAME)" | Out-Host
           
           # 验证分卷生成
