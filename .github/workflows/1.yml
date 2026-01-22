@@ -18,9 +18,10 @@ jobs:
         
         Write-Host "Testing deletion of release: $releaseName"
         
-        # Check if release exists and delete it
+        # Check if release exists (this command will return exit code 1 if release doesn't exist)
         $releaseExists = gh release view "$releaseName" --json id --jq ".id" 2>$null
         $exitCode = $LASTEXITCODE
+        
         if ($exitCode -eq 0) {
             Write-Host "Release $releaseName exists, attempting to delete..."
             try {
@@ -33,10 +34,11 @@ jobs:
             Write-Host "Release $releaseName does not exist, nothing to delete"
         }
         
-        # Check if tag exists and delete it
-        $tagExists = git ls-remote --tags origin "$releaseName" 2>$null
+        # Check if tag exists (git ls-remote returns exit code 0 even when tag doesn't exist)
+        $tagOutput = git ls-remote --tags origin "$releaseName" 2>$null
         $gitExitCode = $LASTEXITCODE
-        if ($gitExitCode -eq 0 -and $tagExists) {
+        
+        if ($gitExitCode -eq 0 -and $tagOutput) {
             Write-Host "Tag $releaseName exists, attempting to delete..."
             try {
                 git push origin --delete refs/tags/"$releaseName"
