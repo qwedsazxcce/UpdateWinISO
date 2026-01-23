@@ -23,7 +23,7 @@ jobs:
       Windows11_LTSC2024_amd64_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001
       Windows11_LTSC2024_amd64_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
       Windows11_LTSC2024_amd64_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
-      # 核心参数
+      # 核心参数（修改名称，其余不变）
       WORK_DIR: ${{ github.workspace }}
       ESD_MAIN_FILE: Windows10_LTSC_2021_32&64_Windows11_LTSC_2025.esd
       SPLIT_SIZE: 1950M
@@ -91,17 +91,20 @@ jobs:
       - name: Process each Windows version (Win10/Win11 LTSC)
         shell: pwsh
         run: |
-          # 定义需要处理的版本列表（前缀 + ESD索引 + 是否为第一个版本）
+          # 定义需要处理的版本列表（区分类型：Win10x86/Win10x64/Win11）
           $versions = @(
-            @{ Prefix = "Windows10_LTSC2021_x86"; Index = 1; IsFirst = $true },
-            @{ Prefix = "Windows10_LTSC2021_amd64"; Index = 1; IsFirst = $false },
-            @{ Prefix = "Windows11_LTSC2024_amd64"; Index = 1; IsFirst = $false }
+            @{ Prefix = "Windows10_LTSC2021_x86"; Type = "Win10x86"; Index = 1 },
+            @{ Prefix = "Windows10_LTSC2021_amd64"; Type = "Win10x64"; Index = 1 },
+            @{ Prefix = "Windows11_LTSC2024_amd64"; Type = "Win11"; Index = 1 }
           )
+          
+          # 主ESD文件路径
+          $mainEsdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_MAIN_FILE
           
           foreach ($version in $versions) {
             $prefix = $version.Prefix
+            $type = $version.Type
             $index = $version.Index
-            $isFirst = $version.IsFirst
             Write-Host "===== 开始处理版本：$prefix ====="
 
             # 1. 下载分卷文件
@@ -144,80 +147,86 @@ jobs:
               throw "解压 $prefix 失败，7z退出码：$LASTEXITCODE"
             }
 
-            # 4. 查找ISO文件并提取install.esd（修复核心：路径语法 + 大小写兼容）
-            Write-Host "查找ISO文件并提取install.esd"
+            # 4. 查找ISO文件
+            Write-Host "查找ISO文件"
             $isoFiles = Get-ChildItem -Path $extractDir -Filter "*.iso" -Recurse
             if ($isoFiles.Count -eq 0) {
               throw "在 $extractDir 中未找到ISO文件"
             }
-            $isoFile = $isoFiles[0]
-            $isoFilePath = $isoFile.FullName  # 直接获取完整路径，避免手动加引号出错
+            $isoFilePath = $isoFiles[0].FullName
             Write-Host "找到ISO文件：$isoFilePath"
 
-            # 提取ISO中的sources/install.esd（兼容Install.esd大小写）
+            # 5. 提取镜像文件（按版本类型区分）
+            $sourceImagePath = $null
             $esdExtractPath = Join-Path -Path $extractDir -ChildPath "sources"
             New-Item -ItemType Directory -Path $esdExtractPath -Force | Out-Null
-            
-            # 修复7-Zip命令：路径用引号正确包裹，兼容大小写查找
-            $7zCmd = "7z x -y -bb1 -o`"$esdExtractPath`" `"$isoFilePath`" sources/[Ii]nstall.esd"
-            Write-Host "执行7-Zip命令：$7zCmd"
-            cmd /c $7zCmd
-            if ($LASTEXITCODE -ge 2) {
-              throw "从ISO提取install.esd失败，7z退出码：$LASTEXITCODE"
-            }
 
-            # 5. 确认install.esd存在（兼容大小写）
-            $installEsdPath = Join-Path -Path $esdExtractPath -ChildPath "install.esd"
-            # 如果小写不存在，检查大写Install.esd并改名
-            if (-not (Test-Path $installEsdPath)) {
-              $installEsdPathUpper = Join-Path -Path $esdExtractPath -ChildPath "Install.esd"
-              if (Test-Path $installEsdPathUpper) {
-                Rename-Item -Path $installEsdPathUpper -Destination $installEsdPath -Force
-                Write-Host "ISO中实际是Install.esd，已重命名为install.esd"
-              } else {
-                throw "未从ISO中提取到install.esd/Install.esd，路径：$esdExtractPath"
+            if ($type -eq "Win10x86" -or $type -eq "Win10x64") {
+              # Win10 LTSC：提取install.wim
+              Write-Host "提取ISO中的install.wim"
+              $7zCmd = "7z x -y -bb1 -o`"$esdExtractPath`" `"$isoFilePath`" sources/[Ii]nstall.wim"
+              cmd /c $7zCmd
+              if ($LASTEXITCODE -ge 2) {
+                throw "提取install.wim失败，7z退出码：$LASTEXITCODE"
               }
-            }
-            Write-Host "找到install.esd：$installEsdPath"
+              $sourceImagePath = Join-Path -Path $esdExtractPath -ChildPath "install.wim"
+              if (-not (Test-Path $sourceImagePath)) {
+                throw "未找到提取的install.wim，路径：$sourceImagePath"
+              }
+            } elseif ($type -eq "Win11") {
+              # Win11 LTSC：提取install.esd并转为临时install.wim
+              Write-Host "提取ISO中的install.esd"
+              $7zCmd = "7z x -y -bb1 -o`"$esdExtractPath`" `"$isoFilePath`" sources/[Ii]nstall.esd"
+              cmd /c $7zCmd
+              if ($LASTEXITCODE -ge 2) {
+                throw "提取install.esd失败，7z退出码：$LASTEXITCODE"
+              }
+              $esdPath = Join-Path -Path $esdExtractPath -ChildPath "install.esd"
+              if (-not (Test-Path $esdPath)) {
+                throw "未找到提取的install.esd，路径：$esdPath"
+              }
 
-            # 6. 分场景处理ESD（核心逻辑）
-            $mainEsdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_MAIN_FILE
-            
-            if ($isFirst) {
-              # 第一个版本（Win10 X86）：直接重命名install.esd为主ESD
-              Write-Host "第一个版本，直接重命名install.esd为主ESD"
+              # ESD转临时WIM（cmd执行DISM命令）
+              Write-Host "将install.esd转为临时install.wim"
+              $tempWimPath = Join-Path -Path $esdExtractPath -ChildPath "temp_install.wim"
+              $dismCmd = "dism /export-image /sourceimagefile:`"$esdPath`" /sourceindex=$index /destinationimagefile:`"$tempWimPath`" /compress:fast /checkintegrity"
+              cmd /c $dismCmd
+              if ($LASTEXITCODE -ne 0) {
+                throw "ESD转WIM失败，DISM退出码：$LASTEXITCODE"
+              }
+              $sourceImagePath = $tempWimPath
+              # 删除原ESD节省空间
+              Remove-Item -Path $esdPath -Force
+            }
+
+            # 6. 处理主ESD（新建/追加，全部用cmd执行DISM）
+            Write-Host "处理主ESD文件：$mainEsdPath"
+            if ($type -eq "Win10x86") {
+              # Win10 x86：新建ESD（cmd执行DISM）
               if (Test-Path $mainEsdPath) {
                 Remove-Item -Path $mainEsdPath -Force
               }
-              Rename-Item -Path $installEsdPath -Destination $mainEsdPath -Force
-              if (-not (Test-Path $mainEsdPath)) {
-                throw "重命名install.esd为主ESD失败"
+              $dismCmd = "dism /export-image /sourceimagefile:`"$sourceImagePath`" /sourceindex=$index /destinationimagefile:`"$mainEsdPath`" /compress:recovery /checkintegrity"
+              Write-Host "执行新建ESD命令：$dismCmd"
+              cmd /c $dismCmd
+              if ($LASTEXITCODE -ne 0) {
+                throw "新建ESD失败，DISM退出码：$LASTEXITCODE"
               }
-              Write-Host "成功将Win10 X86的install.esd重命名为：$mainEsdPath"
             } else {
-              # 非第一个版本：先转临时WIM，再追加到主ESD
-              Write-Host "非第一个版本，先转临时WIM再追加到主ESD"
-              $tempWimPath = Join-Path -Path $env:WORK_DIR -ChildPath "temp_$prefix.wim"
-
-              # 步骤1：将源ESD导出为临时WIM（fast压缩提速）
-              $dismExportTempCmd = "dism /export-image /sourceimagefile:`"$installEsdPath`" /sourceindex=$index /destinationimagefile:`"$tempWimPath`" /compress:fast /checkintegrity"
-              Write-Host "执行DISM命令：$dismExportTempCmd"
-              cmd /c $dismExportTempCmd
-              if ($LASTEXITCODE -ne 0) {
-                throw "DISM导出到临时WIM失败，退出码：$LASTEXITCODE"
+              # Win10 x64/Win11：追加到ESD（cmd执行DISM）
+              if (-not (Test-Path $mainEsdPath)) {
+                throw "主ESD文件不存在，无法追加：$mainEsdPath"
               }
-
-              # 步骤2：将临时WIM追加到主ESD（recovery压缩保持ESD高压缩比）
-              $dismAppendCmd = "dism /append-image /imagefile:`"$mainEsdPath`" /sourceimagefile:`"$tempWimPath`" /sourceindex=1 /compress:recovery /checkintegrity"
-              Write-Host "执行DISM命令：$dismAppendCmd"
-              cmd /c $dismAppendCmd
+              $dismCmd = "dism /append-image /imagefile:`"$mainEsdPath`" /sourceimagefile:`"$sourceImagePath`" /sourceindex=1 /compress:recovery /checkintegrity"
+              Write-Host "执行追加ESD命令：$dismCmd"
+              cmd /c $dismCmd
               if ($LASTEXITCODE -ne 0) {
-                throw "DISM追加到主ESD失败，退出码：$LASTEXITCODE"
+                throw "追加到ESD失败，DISM退出码：$LASTEXITCODE"
               }
-
-              # 删除临时WIM
-              Remove-Item -Path $tempWimPath -Force
-              Write-Host "成功将$prefix追加到主ESD，临时WIM已清理"
+              # 删除Win11临时WIM
+              if ($type -eq "Win11" -and (Test-Path $sourceImagePath)) {
+                Remove-Item -Path $sourceImagePath -Force
+              }
             }
 
             # 7. 清理当前版本临时文件
