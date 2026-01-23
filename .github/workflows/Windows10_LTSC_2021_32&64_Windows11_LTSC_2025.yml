@@ -1,0 +1,288 @@
+name: Windows10_LTSC_2021_32&64_Windows11_LTSC_2025
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - '.github/workflows/Windows10_LTSC_2021_32&64_Windows11_LTSC_2025.yml'
+
+jobs:
+  build-and-upload-esd:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      # Win10 LTSC2021 x86 分卷
+      Windows10_LTSC2021_x86_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.001
+      Windows10_LTSC2021_x86_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_x86-19044.6811/Windows10_LTSC2021_x86-19044.6811.7z.002
+      Windows10_LTSC2021_x86_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/test.txt
+      # Win10 LTSC2021 amd64 分卷
+      Windows10_LTSC2021_amd64_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.001
+      Windows10_LTSC2021_amd64_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.002
+      Windows10_LTSC2021_amd64_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows10_LTSC2021_amd64-19044.6811/Windows10_LTSC2021_amd64-19044.6811.7z.003
+      # Win11 LTSC2024 amd64 分卷
+      Windows11_LTSC2024_amd64_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001
+      Windows11_LTSC2024_amd64_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
+      Windows11_LTSC2024_amd64_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
+      # 核心参数
+      WORK_DIR: ${{ github.workspace }}
+      ESD_MAIN_FILE: Windows10_LTSC_2021_32&64_Windows11_LTSC_2025.esd
+      SPLIT_SIZE: 1950M
+      RETRY_COUNT: 10
+      RETRY_INTERVAL: 30
+      RELEASE_NAME: Windows10_LTSC_2021_32&64_Windows11_LTSC_2025
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Delete existing Release and Tag (with full log)
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $releaseName = $env:RELEASE_NAME
+          Write-Host "===== 开始清理旧版本：$releaseName ====="
+          
+          # 列出当前所有Release/Tag（便于排查）
+          Write-Host "当前仓库的Release列表："
+          $releaseList = gh release list 2>&1
+          if ($LASTEXITCODE -eq 0) { Write-Host $releaseList } else { Write-Host "暂无Release" }
+          
+          Write-Host "当前本地Tag列表："
+          $localTags = git tag --list
+          if ($localTags) { Write-Host $localTags } else { Write-Host "暂无本地Tag" }
+          
+          Write-Host "当前远程Tag列表（筛选$releaseName）："
+          $remoteTags = git ls-remote --tags origin | FindStr $releaseName 2>&1
+          if ($remoteTags) { Write-Host $remoteTags } else { Write-Host "暂无远程Tag: $releaseName" }
+
+          # 删除Release（包括Draft，显式检查）
+          Write-Host "`n[1/3] 删除Release..."
+          $releaseExists = gh release view "$releaseName" 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete "$releaseName" -y
+            Write-Host "[成功] Release '$releaseName' 已删除"
+          } else {
+            Write-Host "[信息] Release '$releaseName' 不存在，跳过删除"
+          }
+
+          # 删除远程Tag（修正路径格式 + 显式检查）
+          Write-Host "`n[2/3] 删除远程Tag..."
+          $tagRef = "refs/tags/$releaseName"
+          $remoteTagExists = git ls-remote --tags origin "$tagRef" 2>&1
+          if ($remoteTagExists) {
+            git push origin --delete "$tagRef"
+            Write-Host "[成功] 远程Tag '$releaseName' 已删除"
+          } else {
+            Write-Host "[信息] 远程Tag '$releaseName' 不存在，跳过删除"
+          }
+
+          # 删除本地Tag（显式检查）
+          Write-Host "`n[3/3] 删除本地Tag..."
+          if (git tag --list "$releaseName") {
+            git tag -d "$releaseName"
+            Write-Host "[成功] 本地Tag '$releaseName' 已删除"
+          } else {
+            Write-Host "[信息] 本地Tag '$releaseName' 不存在，跳过删除"
+          }
+
+          Write-Host "`n===== 清理旧版本完成 =====`n"
+
+      - name: Process each Windows version (Win10/Win11 LTSC)
+        shell: pwsh
+        run: |
+          # 定义需要处理的版本列表（前缀 + ESD索引 + 是否为第一个版本）
+          $versions = @(
+            @{ Prefix = "Windows10_LTSC2021_x86"; Index = 1; IsFirst = $true },
+            @{ Prefix = "Windows10_LTSC2021_amd64"; Index = 1; IsFirst = $false },
+            @{ Prefix = "Windows11_LTSC2024_amd64"; Index = 1; IsFirst = $false }
+          )
+          
+          foreach ($version in $versions) {
+            $prefix = $version.Prefix
+            $index = $version.Index
+            $isFirst = $version.IsFirst
+            Write-Host "===== 开始处理版本：$prefix ====="
+
+            # 1. 下载分卷文件
+            Write-Host "下载 $prefix 分卷"
+            $volumes = @("001", "002", "003")
+            foreach ($vol in $volumes) {
+              $varName = "$prefix`_$vol"
+              $url = [Environment]::GetEnvironmentVariable($varName)
+              if (-not $url) {
+                Write-Warning "变量 $varName 未定义，跳过该分卷"
+                continue
+              }
+              $fileName = "$prefix.7z.$vol"
+              $filePath = Join-Path -Path $env:WORK_DIR -ChildPath $fileName
+              curl.exe -L -o "$filePath" "$url"
+              if ($LASTEXITCODE -ne 0) {
+                throw "下载 $fileName 失败，curl退出码：$LASTEXITCODE"
+              }
+              $fileSize = (Get-Item "$filePath").Length
+              if ($fileSize -eq 0 -and $vol -ne "003") {
+                throw "$fileName 下载后为空文件"
+              }
+              Write-Host "$fileName 下载成功（大小：$([math]::Round($fileSize/1MB,2)) MB）"
+            }
+
+            # 2. 创建解压目录
+            Write-Host "创建解压目录"
+            $extractDir = Join-Path -Path $env:WORK_DIR -ChildPath "extract_$prefix"
+            if (Test-Path $extractDir) {
+              Remove-Item -Path $extractDir -Recurse -Force
+            }
+            New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+            Write-Host "解压目录：$extractDir"
+
+            # 3. 解压分卷文件
+            Write-Host "开始解压 $prefix 分卷"
+            $firstVol = Join-Path -Path $env:WORK_DIR -ChildPath "$prefix.7z.001"
+            7z x -y -bb1 -o"$extractDir" "$firstVol"
+            if ($LASTEXITCODE -ge 2) {
+              throw "解压 $prefix 失败，7z退出码：$LASTEXITCODE"
+            }
+
+            # 4. 查找ISO文件并提取install.esd
+            Write-Host "查找ISO文件并提取install.esd"
+            $isoFiles = Get-ChildItem -Path $extractDir -Filter "*.iso" -Recurse
+            if ($isoFiles.Count -eq 0) {
+              throw "在 $extractDir 中未找到ISO文件"
+            }
+            $isoPath = "`"$($isoFiles[0].FullName)`""
+            Write-Host "找到ISO文件：$($isoFiles[0].FullName)"
+
+            # 提取ISO中的sources/install.esd到解压目录
+            $esdExtractPath = Join-Path -Path $extractDir -ChildPath "sources"
+            New-Item -ItemType Directory -Path $esdExtractPath -Force | Out-Null
+            7z x -y -bb1 -o"$esdExtractPath" "$isoPath" "sources/install.esd"
+            if ($LASTEXITCODE -ge 2) {
+              throw "从ISO提取install.esd失败，7z退出码：$LASTEXITCODE"
+            }
+
+            # 5. 确认install.esd存在
+            $installEsdPath = Join-Path -Path $esdExtractPath -ChildPath "install.esd"
+            if (-not (Test-Path $installEsdPath)) {
+              throw "未从ISO中提取到install.esd，路径：$installEsdPath"
+            }
+            $installEsdPathQuote = "`"$installEsdPath`""
+            Write-Host "找到install.esd：$installEsdPath"
+
+            # 6. 分场景处理ESD（核心逻辑）
+            $mainEsdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_MAIN_FILE
+            $mainEsdPathQuote = "`"$mainEsdPath`""
+            
+            if ($isFirst) {
+              # 第一个版本（Win10 X86）：直接重命名install.esd为主ESD
+              Write-Host "第一个版本，直接重命名install.esd为主ESD"
+              if (Test-Path $mainEsdPath) {
+                Remove-Item -Path $mainEsdPath -Force
+              }
+              Rename-Item -Path $installEsdPath -Destination $mainEsdPath -Force
+              if (-not (Test-Path $mainEsdPath)) {
+                throw "重命名install.esd为主ESD失败"
+              }
+              Write-Host "成功将Win10 X86的install.esd重命名为：$mainEsdPath"
+            } else {
+              # 非第一个版本：先转临时WIM，再追加到主ESD
+              Write-Host "非第一个版本，先转临时WIM再追加到主ESD"
+              $tempWimPath = Join-Path -Path $env:WORK_DIR -ChildPath "temp_$prefix.wim"
+              $tempWimPathQuote = "`"$tempWimPath`""
+
+              # 步骤1：将源ESD导出为临时WIM（fast压缩提速）
+              $dismExportTempCmd = "dism /export-image /sourceimagefile=$installEsdPathQuote /sourceindex=$index /destinationimagefile=$tempWimPathQuote /compress:fast /checkintegrity"
+              cmd /c $dismExportTempCmd
+              if ($LASTEXITCODE -ne 0) {
+                throw "DISM导出到临时WIM失败，退出码：$LASTEXITCODE"
+              }
+
+              # 步骤2：将临时WIM追加到主ESD（recovery压缩保持ESD高压缩比）
+              $dismAppendCmd = "dism /append-image /imagefile=$mainEsdPathQuote /sourceimagefile=$tempWimPathQuote /sourceindex=1 /compress:recovery /checkintegrity"
+              cmd /c $dismAppendCmd
+              if ($LASTEXITCODE -ne 0) {
+                throw "DISM追加到主ESD失败，退出码：$LASTEXITCODE"
+              }
+
+              # 删除临时WIM
+              Remove-Item -Path $tempWimPath -Force
+              Write-Host "成功将$prefix追加到主ESD，临时WIM已清理"
+            }
+
+            # 7. 清理当前版本临时文件
+            Write-Host "清理 $prefix 临时文件"
+            foreach ($vol in $volumes) {
+              $fileName = "$prefix.7z.$vol"
+              $filePath = Join-Path -Path $env:WORK_DIR -ChildPath $fileName
+              if (Test-Path $filePath) {
+                Remove-Item -Path $filePath -Force
+              }
+            }
+            if (Test-Path $extractDir) {
+              Remove-Item -Path $extractDir -Recurse -Force
+            }
+
+            Write-Host "===== 完成处理版本：$prefix ====="
+          }
+
+      - name: Split compress ESD file
+        shell: pwsh
+        run: |
+          Write-Host "分卷压缩 ESD 文件"
+          $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_MAIN_FILE
+          $splitOutput = Join-Path -Path $env:WORK_DIR -ChildPath "$($env:ESD_MAIN_FILE).7z"
+          $volParam = "-v$($env:SPLIT_SIZE)"
+          7z a -y $volParam "$splitOutput" "$esdPath"
+          if ($LASTEXITCODE -ge 2) {
+            throw "7z分卷压缩失败，退出码：$LASTEXITCODE"
+          }
+          Remove-Item -Path $esdPath -Force
+
+      - name: Upload via GitHub CLI with retry
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $releaseName = $env:RELEASE_NAME
+          $splitFiles = Get-ChildItem -LiteralPath "$env:WORK_DIR" -Filter "$($env:ESD_MAIN_FILE).7z.*" -ErrorAction Stop
+          $retryCount = [int]$env:RETRY_COUNT
+          $retryInterval = [int]$env:RETRY_INTERVAL
+
+          if ($splitFiles.Count -eq 0) {
+            throw "未找到分卷压缩文件！路径：$env:WORK_DIR\$($env:ESD_MAIN_FILE).7z.*"
+          }
+
+          $uploadSuccess = $false
+          for ($i=1; $i -le $retryCount; $i++) {
+            try {
+              Write-Host "第 $i 次上传（共 $retryCount 次），文件数：$($splitFiles.Count)"
+              gh release create "$releaseName" `
+                --title "$releaseName" `
+                --notes "Auto-built Windows10 LTSC 2021 + Windows11 LTSC 2024 ESD" `
+                --latest `
+                $splitFiles.FullName
+              $uploadSuccess = $true
+              Write-Host "上传成功"
+              break
+            }
+            catch {
+              Write-Warning "第 $i 次上传失败：$($_.Exception.Message)"
+              if ($i -lt $retryCount) {
+                Write-Host "等待 $retryInterval 秒后重试..."
+                Start-Sleep -Seconds $retryInterval
+              }
+            }
+          }
+
+          if (-not $uploadSuccess) {
+            throw "重试 $retryCount 次后仍上传失败"
+          }
+
+      - name: Final cleanup
+        shell: pwsh
+        if: always()
+        run: |
+          Write-Host "执行最终清理"
+          Get-ChildItem -Path $env:WORK_DIR -Filter "extract_*" -Directory | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          Get-ChildItem -Path $env:WORK_DIR -Filter "Windows*.7z.00*" | Remove-Item -Force -ErrorAction SilentlyContinue
+          Write-Host "清理完成"
