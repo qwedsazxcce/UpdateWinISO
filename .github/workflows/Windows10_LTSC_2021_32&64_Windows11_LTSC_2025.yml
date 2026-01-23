@@ -144,34 +144,44 @@ jobs:
               throw "解压 $prefix 失败，7z退出码：$LASTEXITCODE"
             }
 
-            # 4. 查找ISO文件并提取install.esd
+            # 4. 查找ISO文件并提取install.esd（修复核心：路径语法 + 大小写兼容）
             Write-Host "查找ISO文件并提取install.esd"
             $isoFiles = Get-ChildItem -Path $extractDir -Filter "*.iso" -Recurse
             if ($isoFiles.Count -eq 0) {
               throw "在 $extractDir 中未找到ISO文件"
             }
-            $isoPath = "`"$($isoFiles[0].FullName)`""
-            Write-Host "找到ISO文件：$($isoFiles[0].FullName)"
+            $isoFile = $isoFiles[0]
+            $isoFilePath = $isoFile.FullName  # 直接获取完整路径，避免手动加引号出错
+            Write-Host "找到ISO文件：$isoFilePath"
 
-            # 提取ISO中的sources/install.esd到解压目录
+            # 提取ISO中的sources/install.esd（兼容Install.esd大小写）
             $esdExtractPath = Join-Path -Path $extractDir -ChildPath "sources"
             New-Item -ItemType Directory -Path $esdExtractPath -Force | Out-Null
-            7z x -y -bb1 -o"$esdExtractPath" "$isoPath" "sources/install.esd"
+            
+            # 修复7-Zip命令：路径用引号正确包裹，兼容大小写查找
+            $7zCmd = "7z x -y -bb1 -o`"$esdExtractPath`" `"$isoFilePath`" sources/[Ii]nstall.esd"
+            Write-Host "执行7-Zip命令：$7zCmd"
+            cmd /c $7zCmd
             if ($LASTEXITCODE -ge 2) {
               throw "从ISO提取install.esd失败，7z退出码：$LASTEXITCODE"
             }
 
-            # 5. 确认install.esd存在
+            # 5. 确认install.esd存在（兼容大小写）
             $installEsdPath = Join-Path -Path $esdExtractPath -ChildPath "install.esd"
+            # 如果小写不存在，检查大写Install.esd并改名
             if (-not (Test-Path $installEsdPath)) {
-              throw "未从ISO中提取到install.esd，路径：$installEsdPath"
+              $installEsdPathUpper = Join-Path -Path $esdExtractPath -ChildPath "Install.esd"
+              if (Test-Path $installEsdPathUpper) {
+                Rename-Item -Path $installEsdPathUpper -Destination $installEsdPath -Force
+                Write-Host "ISO中实际是Install.esd，已重命名为install.esd"
+              } else {
+                throw "未从ISO中提取到install.esd/Install.esd，路径：$esdExtractPath"
+              }
             }
-            $installEsdPathQuote = "`"$installEsdPath`""
             Write-Host "找到install.esd：$installEsdPath"
 
             # 6. 分场景处理ESD（核心逻辑）
             $mainEsdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_MAIN_FILE
-            $mainEsdPathQuote = "`"$mainEsdPath`""
             
             if ($isFirst) {
               # 第一个版本（Win10 X86）：直接重命名install.esd为主ESD
@@ -188,17 +198,18 @@ jobs:
               # 非第一个版本：先转临时WIM，再追加到主ESD
               Write-Host "非第一个版本，先转临时WIM再追加到主ESD"
               $tempWimPath = Join-Path -Path $env:WORK_DIR -ChildPath "temp_$prefix.wim"
-              $tempWimPathQuote = "`"$tempWimPath`""
 
               # 步骤1：将源ESD导出为临时WIM（fast压缩提速）
-              $dismExportTempCmd = "dism /export-image /sourceimagefile=$installEsdPathQuote /sourceindex=$index /destinationimagefile=$tempWimPathQuote /compress:fast /checkintegrity"
+              $dismExportTempCmd = "dism /export-image /sourceimagefile:`"$installEsdPath`" /sourceindex=$index /destinationimagefile:`"$tempWimPath`" /compress:fast /checkintegrity"
+              Write-Host "执行DISM命令：$dismExportTempCmd"
               cmd /c $dismExportTempCmd
               if ($LASTEXITCODE -ne 0) {
                 throw "DISM导出到临时WIM失败，退出码：$LASTEXITCODE"
               }
 
               # 步骤2：将临时WIM追加到主ESD（recovery压缩保持ESD高压缩比）
-              $dismAppendCmd = "dism /append-image /imagefile=$mainEsdPathQuote /sourceimagefile=$tempWimPathQuote /sourceindex=1 /compress:recovery /checkintegrity"
+              $dismAppendCmd = "dism /append-image /imagefile:`"$mainEsdPath`" /sourceimagefile:`"$tempWimPath`" /sourceindex=1 /compress:recovery /checkintegrity"
+              Write-Host "执行DISM命令：$dismAppendCmd"
               cmd /c $dismAppendCmd
               if ($LASTEXITCODE -ne 0) {
                 throw "DISM追加到主ESD失败，退出码：$LASTEXITCODE"
