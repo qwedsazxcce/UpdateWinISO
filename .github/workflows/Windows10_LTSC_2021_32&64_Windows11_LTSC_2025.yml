@@ -23,7 +23,7 @@ jobs:
       Windows11_LTSC2024_amd64_001: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.001
       Windows11_LTSC2024_amd64_002: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.002
       Windows11_LTSC2024_amd64_003: https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Windows11_LTSC2024_amd64-26200.7627/Windows11_LTSC2024_amd64-26200.7627.7z.003
-      # 核心参数（修改名称，其余不变）
+      # 核心参数
       WORK_DIR: ${{ github.workspace }}
       ESD_MAIN_FILE: Windows10_LTSC_2021_32&64_Windows11_LTSC_2025.esd
       SPLIT_SIZE: 1950M
@@ -69,7 +69,7 @@ jobs:
           # 删除远程Tag（修正路径格式 + 显式检查）
           Write-Host "`n[2/3] 删除远程Tag..."
           $tagRef = "refs/tags/$releaseName"
-          $remoteTagExists = git ls-remote --tags origin "$tagRef" 2>&1
+          $remoteTagExists = git ls-remote --tags origin | FindStr $releaseName 2>&1
           if ($remoteTagExists) {
             git push origin --delete "$tagRef"
             Write-Host "[成功] 远程Tag '$releaseName' 已删除"
@@ -86,7 +86,7 @@ jobs:
             Write-Host "[信息] 本地Tag '$releaseName' 不存在，跳过删除"
           }
 
-          Write-Host "`n===== 清理旧版本完成 =====`n"
+          Write-Host "===== 清理旧版本完成 =====`n"
 
       - name: Process each Windows version (Win10/Win11 LTSC)
         shell: pwsh
@@ -156,34 +156,47 @@ jobs:
             $isoFilePath = $isoFiles[0].FullName
             Write-Host "找到ISO文件：$isoFilePath"
 
-            # 5. 提取镜像文件（按版本类型区分）
+            # 5. 提取镜像文件（修复7-Zip路径逻辑，适配UDF ISO）
             $sourceImagePath = $null
             $esdExtractPath = Join-Path -Path $extractDir -ChildPath "sources"
             New-Item -ItemType Directory -Path $esdExtractPath -Force | Out-Null
 
             if ($type -eq "Win10x86" -or $type -eq "Win10x64") {
-              # Win10 LTSC：提取install.wim
-              Write-Host "提取ISO中的install.wim"
-              $7zCmd = "7z x -y -bb1 -o`"$esdExtractPath`" `"$isoFilePath`" sources/[Ii]nstall.wim"
+              # Win10 LTSC：修复7-Zip路径，先提取整个sources目录（适配UDF ISO）
+              Write-Host "提取ISO中的sources目录（含install.wim）"
+              # 核心修复：去掉路径前多余的/，直接提取整个sources目录
+              $7zCmd = "7z x -y -bb1 -o`"$extractDir`" `"$isoFilePath`" sources"
               cmd /c $7zCmd
               if ($LASTEXITCODE -ge 2) {
-                throw "提取install.wim失败，7z退出码：$LASTEXITCODE"
+                throw "提取sources目录失败，7z退出码：$LASTEXITCODE"
               }
+              # 检查提取后的install.wim（兼容大小写）
               $sourceImagePath = Join-Path -Path $esdExtractPath -ChildPath "install.wim"
               if (-not (Test-Path $sourceImagePath)) {
-                throw "未找到提取的install.wim，路径：$sourceImagePath"
+                $sourceImagePathUpper = Join-Path -Path $esdExtractPath -ChildPath "Install.wim"
+                if (Test-Path $sourceImagePathUpper) {
+                  Rename-Item -Path $sourceImagePathUpper -Destination $sourceImagePath -Force
+                } else {
+                  throw "未找到提取的install.wim，路径：$esdExtractPath"
+                }
               }
             } elseif ($type -eq "Win11") {
-              # Win11 LTSC：提取install.esd并转为临时install.wim
-              Write-Host "提取ISO中的install.esd"
-              $7zCmd = "7z x -y -bb1 -o`"$esdExtractPath`" `"$isoFilePath`" sources/[Ii]nstall.esd"
+              # Win11 LTSC：修复7-Zip路径，先提取整个sources目录（含install.esd）
+              Write-Host "提取ISO中的sources目录（含install.esd）"
+              $7zCmd = "7z x -y -bb1 -o`"$extractDir`" `"$isoFilePath`" sources"
               cmd /c $7zCmd
               if ($LASTEXITCODE -ge 2) {
-                throw "提取install.esd失败，7z退出码：$LASTEXITCODE"
+                throw "提取sources目录失败，7z退出码：$LASTEXITCODE"
               }
+              # 检查提取后的install.esd（兼容大小写）
               $esdPath = Join-Path -Path $esdExtractPath -ChildPath "install.esd"
               if (-not (Test-Path $esdPath)) {
-                throw "未找到提取的install.esd，路径：$esdPath"
+                $esdPathUpper = Join-Path -Path $esdExtractPath -ChildPath "Install.esd"
+                if (Test-Path $esdPathUpper) {
+                  Rename-Item -Path $esdPathUpper -Destination $esdPath -Force
+                } else {
+                  throw "未找到提取的install.esd，路径：$esdExtractPath"
+                }
               }
 
               # ESD转临时WIM（cmd执行DISM命令）
@@ -198,6 +211,8 @@ jobs:
               # 删除原ESD节省空间
               Remove-Item -Path $esdPath -Force
             }
+
+            Write-Host "成功找到镜像文件：$sourceImagePath"
 
             # 6. 处理主ESD（新建/追加，全部用cmd执行DISM）
             Write-Host "处理主ESD文件：$mainEsdPath"
