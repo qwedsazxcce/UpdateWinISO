@@ -514,7 +514,7 @@ jobs:
         name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
         tag_name: Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025
         files: |
-          workdir/*.7z.*  # 改为通用匹配：匹配workdir下所有.7z.开头的分片文件
+          workdir/*.7z.*
         draft: false
         prerelease: false
         make_latest: true
