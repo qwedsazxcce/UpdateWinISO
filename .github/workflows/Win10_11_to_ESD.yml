@@ -475,7 +475,6 @@ jobs:
     - name: Delete existing release and tag
       shell: pwsh
       run: |
-        $targetName = "Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025"
         
         # 检查并删除Release
         try {
