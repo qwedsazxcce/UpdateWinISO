@@ -1,10 +1,13 @@
 name: Windows10_LTSC2021_x86
 
-on: workflow_dispatch
-#on: [push, pull_request]
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - '.github/workflows/1.Windows10_LTSC2021_x86.yml'
 
 env:
-  Build_VERSION: '19044.6811'
+  Build_VERSION: 'latest'
   FILE_NAME: Windows10_LTSC2021_x86
 
 jobs:
