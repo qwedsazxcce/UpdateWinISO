@@ -37,9 +37,9 @@ jobs:
         cd Win_ISO_Patching_Scripts
         
         # 下载镜像
-        curl -L -o 26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.001 https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Server_2022-2025/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.001
-        curl -L -o 26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.002 https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Server_2022-2025/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.002
-        curl -L -o 26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.003 https://github.com/qwedsazxcce/UpdateWinISO/releases/download/Server_2022-2025/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.003
+        curl -L -o 26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.001 https://github.com/qwedsazxcce/UpdateWinISO/releases/download/WindowsServer_2022-2025/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.001
+        curl -L -o 26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.002 https://github.com/qwedsazxcce/UpdateWinISO/releases/download/WindowsServer_2022-2025/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.002
+        curl -L -o 26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.003 https://github.com/qwedsazxcce/UpdateWinISO/releases/download/WindowsServer_2022-2025/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.003
         7z x 26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_zh-cn.iso.7z.001
         ls
 
