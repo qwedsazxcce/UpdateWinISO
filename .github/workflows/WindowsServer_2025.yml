@@ -1,10 +1,13 @@
 name: WindowsServer_2025_amd64
 
-on: workflow_dispatch
-#on: [push, pull_request]
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - '.github/workflows/WindowsServer_2025.yml'
 
 env:
-  Build_VERSION: '26100.32234'
+  Build_VERSION: 'latest'
   FILE_NAME: WindowsServer_2025_amd64
 
 jobs:
