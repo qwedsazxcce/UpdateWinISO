@@ -1,10 +1,13 @@
 name: WindowsServer_2022_amd64
 
-on: workflow_dispatch
-#on: [push, pull_request]
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - '.github/workflows/WindowsServer_2022.yml'
 
 env:
-  Build_VERSION: '20348.4650'
+  Build_VERSION: 'latest'
   FILE_NAME: WindowsServer_2022_amd64
 
 jobs:
