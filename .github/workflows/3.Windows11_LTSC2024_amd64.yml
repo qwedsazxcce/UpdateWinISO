@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - '.github/workflows/3.Windows11_LTSC2024_amd64.yml'
+  workflow_dispatch:
 
 env:
   Build_VERSION: 'latest'
