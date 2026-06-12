@@ -3,8 +3,9 @@ on:
   push:
     branches: ["main"]
     paths:
-      - '.github/workflows/Windows10_LTSC_2021_32&64_Windows11_LTSC_2025.yml'
-
+      - '.github/workflows/4.Windows10_LTSC_2021_32&64_Windows11_LTSC_2025.yml'
+  workflow_dispatch:
+  
 jobs:
   build-and-upload-esd:
     runs-on: windows-latest
