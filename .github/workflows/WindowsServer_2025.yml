@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - '.github/workflows/WindowsServer_2025.yml'
+  workflow_dispatch:
 
 env:
   Build_VERSION: 'latest'
